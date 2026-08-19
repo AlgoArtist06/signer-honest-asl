@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Regenerate colab_train.ipynb.
+"""Regenerate experiments.ipynb.
 
 The notebook is generated rather than hand-edited so its cells stay in sync with
 `slr.experiment`, and so nobody has to diff JSON by hand. Run this after changing
@@ -10,7 +10,7 @@ import json
 from pathlib import Path
 
 REPO = "https://github.com/AlgoArtist06/signer-honest-asl.git"
-OUT = Path(__file__).with_name("colab_train.ipynb")
+OUT = Path(__file__).with_name("experiments.ipynb")
 
 
 def md(s: str) -> dict:

@@ -99,7 +99,7 @@ backend/
     evaluate.py   temperature scaling, ECE, risk-coverage, per-class confusion
     api.py        FastAPI service the React Native app calls
   tests/          19 tests, no dataset or GPU needed, ~20 seconds
-  notebooks/      colab_train.ipynb - the full pipeline end to end on a Colab GPU
+  notebooks/      experiments.ipynb - the full pipeline end to end on a Colab GPU
 dataset/
   raw/            downloaded corpora (gitignored)
   manifests/      CSV: path, label, source, group, split (gitignored)
@@ -112,7 +112,7 @@ docs/
 ## Running it
 
 Training happens on Colab.
-Open `backend/notebooks/colab_train.ipynb`, set the runtime to GPU, and work down the cells.
+Open `backend/notebooks/experiments.ipynb`, set the runtime to GPU, and work down the cells.
 It downloads the corpora, recovers groups, runs protocols A, B and C, sweeps model scale, searches architectures, calibrates, and hands back a checkpoint.
 
 The search is driven from the command line too:
