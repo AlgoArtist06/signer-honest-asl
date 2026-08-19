@@ -17,11 +17,11 @@
  ],
  [
   "md",
-  "## 2. Kaggle credentials\n\n[kaggle.com/settings](https://www.kaggle.com/settings) -> **API** -> **Create Legacy API Key**\ndownloads `kaggle.json`. Paste the two values below, or upload the file.\n\nNothing here is committed: `dataset/raw/` and credentials are gitignored."
+  "## 2. Kaggle credentials\n\nBoth corpora live on Kaggle, which refuses unauthenticated downloads.\n\nCredentials come from **Colab Secrets** (left sidebar, key icon) so that no key is ever\ntyped into a cell, saved into the notebook, or pushed to git. Add two secrets and enable\nnotebook access on both:\n\n| secret | value |\n| --- | --- |\n| `KAGGLE_USERNAME` | your Kaggle username |\n| `KAGGLE_KEY` | the 32-char key from `kaggle.json` |\n\n[kaggle.com/settings](https://www.kaggle.com/settings) -> **API** -> **Create Legacy API Key**\ndownloads `kaggle.json` if you need a fresh one."
  ],
  [
   "code",
-  "KAGGLE_USERNAME = \"\"   # e.g. \"ashutosh839\"\nKAGGLE_KEY      = \"\"   # the 32-char key from kaggle.json\n\nfrom pathlib import Path\nif KAGGLE_USERNAME and KAGGLE_KEY:\n    experiment.write_kaggle_credentials(KAGGLE_USERNAME, KAGGLE_KEY)\nelif not (Path.home() / \".kaggle\" / \"kaggle.json\").exists():\n    from google.colab import files\n    p = Path.home() / \".kaggle\"; p.mkdir(parents=True, exist_ok=True)\n    (p / \"kaggle.json\").write_bytes(files.upload()[\"kaggle.json\"])\n    (p / \"kaggle.json\").chmod(0o600)"
+  "from pathlib import Path\n\nif not (Path.home() / \".kaggle\" / \"kaggle.json\").exists():\n    from google.colab import userdata\n    experiment.write_kaggle_credentials(userdata.get(\"KAGGLE_USERNAME\"),\n                                        userdata.get(\"KAGGLE_KEY\"))\nelse:\n    print(\"[kaggle] credentials already present\")"
  ],
  [
   "md",
