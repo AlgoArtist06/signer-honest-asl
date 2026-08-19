@@ -63,6 +63,27 @@ def write_kaggle_credentials(username: str, key: str) -> None:
     print(f"[kaggle] credentials for {username} written to {p}")
 
 
+def wait_for_kaggle(get, poll: int = 30) -> None:
+    """Block until Colab Secrets carry Kaggle credentials, then write them.
+
+    `get` is `google.colab.userdata.get`, passed in so this module keeps no
+    dependency on Colab. An unattended run should not die because the secrets
+    were not in place at the moment the cell started; it should sit still and
+    pick them up as soon as they are.
+    """
+    if (Path.home() / ".kaggle" / "kaggle.json").exists():
+        print("[kaggle] credentials already present")
+        return
+    while True:
+        try:
+            write_kaggle_credentials(get("KAGGLE_USERNAME"), get("KAGGLE_KEY"))
+            return
+        except Exception as e:
+            print(f"[kaggle] waiting for KAGGLE_USERNAME / KAGGLE_KEY in Colab "
+                  f"Secrets ({type(e).__name__}); retrying in {poll}s", flush=True)
+            time.sleep(poll)
+
+
 # --- sampling ----------------------------------------------------------------
 
 def subsample(rows: list[dict], per_class: int, seed: int = 0) -> list[dict]:

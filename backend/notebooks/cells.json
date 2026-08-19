@@ -21,7 +21,7 @@
  ],
  [
   "code",
-  "from pathlib import Path\n\nif not (Path.home() / \".kaggle\" / \"kaggle.json\").exists():\n    from google.colab import userdata\n    experiment.write_kaggle_credentials(userdata.get(\"KAGGLE_USERNAME\"),\n                                        userdata.get(\"KAGGLE_KEY\"))\nelse:\n    print(\"[kaggle] credentials already present\")"
+  "from google.colab import userdata\n\nexperiment.wait_for_kaggle(userdata.get)"
  ],
  [
   "md",
@@ -97,10 +97,10 @@
  ],
  [
   "md",
-  "## 10. Take the model home\n\nDownloads the checkpoint plus its calibration report. Keep them together: the API reads\n`eval.json` from beside the `.pt` to get the temperature and threshold."
+  "## 10. Take the model home\n\n`slr_model.zip` holds the checkpoint plus its calibration report. Keep them together: the\nAPI reads `eval.json` from beside the `.pt` to get the temperature and threshold.\n\nThe download is left as a manual step so an unattended run does not stall on a browser\nprompt hours after everyone has stopped watching."
  ],
  [
   "code",
-  "import shutil, json\nfrom pathlib import Path\nfrom google.colab import files\n\nck = Path(cal[\"checkpoint\"]).parent\nshutil.make_archive(\"slr_model\", \"zip\", ck)\nfiles.download(\"slr_model.zip\")\nprint(json.dumps(experiment.load()[\"stages\"], indent=2)[:2000])"
+  "import shutil, json\nfrom pathlib import Path\n\nck = Path(cal[\"checkpoint\"]).parent\nzipped = shutil.make_archive(\"/content/slr_model\", \"zip\", ck)\nprint(\"checkpoint bundle:\", zipped)\nprint(json.dumps(experiment.load()[\"stages\"], indent=2)[:2000])\n\n# Download it with the file browser in the left sidebar, or uncomment:\n# from google.colab import files; files.download(zipped)"
  ]
 ]
