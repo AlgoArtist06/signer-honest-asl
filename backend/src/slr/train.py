@@ -155,14 +155,36 @@ def sweep(rows: list[dict], presets: list[str], epochs: int = 8,
             "Re-split with `python -m slr.data <manifest> --val 0.15`."
         )
 
+    out_dir.mkdir(parents=True, exist_ok=True)
+    board_path = out_dir / f"{tag}_leaderboard.json"
+
+    # Resume. The full zoo is several hours on one GPU, which is longer than a
+    # Colab session lives, so the board is written after every candidate and
+    # already-scored candidates are read back rather than retrained. Point
+    # `out_dir` at persistent storage (Drive) and the sweep survives a
+    # disconnect; point it at scratch and this still saves the run from a
+    # kernel restart.
     board: list[dict] = []
+    if board_path.exists():
+        board = json.loads(board_path.read_text()).get("leaderboard", [])
+        print(f"[sweep] resuming: {len(board)} candidate(s) already scored")
+
     for name in presets:
+        if any(b["preset"] == name for b in board):
+            print(f"[sweep] {name} already scored; skipping")
+            continue
         try:
             r = train_one(rows, name, epochs, out_dir, workers, seed=seed,
                           tag=f"{tag}_{name}", eval_test=False)
         except RuntimeError as e:   # OOM and shape errors both land here
             print(f"[sweep] {name} failed ({type(e).__name__}: {e}); skipping")
             continue
+        finally:
+            # The previous candidate's blocks are still held by the caching
+            # allocator; the next one is usually bigger. Without this a sweep
+            # OOMs on a model that would have fit had it run first.
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
         p = M.PRESETS[name]
         board.append({
             "preset": name, "family": p.family, "tier": p.tier,
@@ -171,6 +193,8 @@ def sweep(rows: list[dict], presets: list[str], epochs: int = 8,
             "secs_per_epoch": round(
                 sum(h["secs"] for h in r["history"]) / max(len(r["history"]), 1), 1),
         })
+        board_path.write_text(json.dumps({"leaderboard": board,
+                                          "complete": False}, indent=2))
 
     if not board:
         raise RuntimeError("every candidate failed")
@@ -187,10 +211,10 @@ def sweep(rows: list[dict], presets: list[str], epochs: int = 8,
     final = train_one(rows, winner, epochs, out_dir, workers, seed=seed,
                       tag=f"{tag}_WINNER_{winner}", eval_test=True)
     result = {"leaderboard": board, "winner": winner, "winner_test": final.get("test"),
-              "selected_on": "val_f1", "note": "test evaluated once, after selection"}
-    out_dir.mkdir(parents=True, exist_ok=True)
-    (out_dir / f"{tag}_leaderboard.json").write_text(json.dumps(result, indent=2))
-    print(f"[ok] {out_dir / f'{tag}_leaderboard.json'}")
+              "selected_on": "val_f1", "complete": True,
+              "note": "test evaluated once, after selection"}
+    board_path.write_text(json.dumps(result, indent=2))
+    print(f"[ok] {board_path}")
     return result
 
 

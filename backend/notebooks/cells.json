@@ -69,7 +69,7 @@
  ],
  [
   "md",
-  "## 8. Architecture search\n\nRanked on validation macro-F1. Only the winner is run against the test split.\n\n`quick` is four models across the families and finishes in one session. `arch` is the\nfull eleven-model comparison and wants an A100."
+  "## 8. Architecture search\n\nEvery backbone the reading list pointed at, ranked on validation macro-F1.\nOnly the winner is run against the test split.\n\nThe sweep is resumable: `runs/C_arch_leaderboard.json` is rewritten after each\ncandidate and re-read on restart, so a dropped session costs the model in flight,\nnot the sweep. Re-run this cell after a reconnect and it picks up where it stopped\n(re-run section 3 first, since the VM's disk is wiped with it)."
  ],
  [
   "code",
@@ -77,7 +77,7 @@
  ],
  [
   "code",
-  "SEARCH = \"quick\"     # \"quick\" | \"scale\" | \"arch\" | \"mobile\" | \"all\"\n\narch = experiment.run(\"arch\", per_class=PER_CLASS,\n                      presets=M.SWEEPS[SEARCH], epochs=EPOCHS)\nBEST = arch[\"winner\"]\nprint(\"winner:\", BEST, \"| test:\", arch[\"winner_test\"])"
+  "SEARCH = \"all\"      # \"quick\" | \"scale\" | \"arch\" | \"mobile\" | \"all\"\n\n# Cheapest first. A full-zoo sweep is longer than a free Colab session, and the\n# board is written after every candidate, so ordering by cost means a\n# disconnect costs the three 448/518px monsters rather than fifteen models.\nORDER = sorted(M.SWEEPS[SEARCH],\n               key=lambda k: (M.PRESETS[k].img_size, M.PRESETS[k].approx_params_m))\nprint(len(ORDER), \"candidates:\", ORDER)\n\narch = experiment.run(\"arch\", per_class=PER_CLASS, presets=ORDER, epochs=EPOCHS)\nBEST = arch[\"winner\"]\nprint(\"winner:\", BEST, \"| test:\", arch[\"winner_test\"])"
  ],
  [
   "md",

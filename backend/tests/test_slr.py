@@ -241,6 +241,45 @@ def test_sweep_refuses_to_select_without_a_validation_split(tmp_path):
         train.sweep(rows, ["vit_tiny"], epochs=1, out_dir=tmp_path / "runs")
 
 
+def test_sweep_resumes_from_a_partial_leaderboard(tmp_path, monkeypatch):
+    """A full-zoo sweep outlives a Colab session, so a restart must not retrain
+    candidates that already have a score."""
+    import json
+
+    from slr import train
+
+    rows = _write_corpus(tmp_path, "synth", n_groups=9, per_group=4)
+    for r in rows:
+        r["split"] = ("train" if r["group"].endswith(("g0", "g1", "g2", "g3"))
+                      else "val" if r["group"].endswith(("g4", "g5")) else "test")
+
+    trained: list[str] = []
+
+    def fake_train_one(_rows, preset, *a, **kw):
+        trained.append(preset)
+        score = {"vit_tiny": 0.9, "vit_small": 0.5}[preset]
+        return {"preset": preset, "params_m": 1.0,
+                "best": {"val_f1": score, "val_acc": score},
+                "history": [{"secs": 1.0}], "test": {"acc": score}}
+
+    monkeypatch.setattr(train, "train_one", fake_train_one)
+    runs = tmp_path / "runs"
+    runs.mkdir()
+    (runs / "sweep_leaderboard.json").write_text(json.dumps({"leaderboard": [
+        {"preset": "vit_tiny", "family": "vit", "tier": "scale", "params_m": 5.5,
+         "img_size": 224, "val_f1": 0.9, "val_acc": 0.9, "secs_per_epoch": 1.0},
+    ]}))
+
+    res = train.sweep(rows, ["vit_tiny", "vit_small"], epochs=1, out_dir=runs)
+
+    # vit_tiny appears once and only as the winner's final test run, never as a
+    # search candidate: its score came off disk.
+    assert trained == ["vit_small", "vit_tiny"]
+    assert {b["preset"] for b in res["leaderboard"]} == {"vit_tiny", "vit_small"}
+    assert res["winner"] == "vit_tiny"
+    assert res["complete"] is True
+
+
 # --- what group recovery can and cannot do -----------------------------------
 
 def test_recovery_fragments_signers_when_each_shot_is_unique(tmp_path):

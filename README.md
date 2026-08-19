@@ -126,6 +126,9 @@ python -m slr.train dataset/manifests/cross_corpus.csv --preset mobile  # on-dev
 
 Each writes a leaderboard with validation score, parameter count, and seconds per epoch, names the winner, and evaluates that one on test.
 
+The leaderboard is rewritten after every candidate and re-read on restart, so a sweep that outlives its session resumes instead of starting over.
+`--preset all` runs the whole zoo; on a single T4 that is several sessions' work, and losing one costs the model in flight rather than the sweep.
+
 Locally, for inference and tests:
 
 ```bash
