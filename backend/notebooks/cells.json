@@ -1,0 +1,106 @@
+[
+ [
+  "md",
+  "# Signer-honest ASL recognition\n\nRuns the full pipeline on a Colab GPU. Set **Runtime -> Change runtime type -> T4 GPU** first.\n\nThe experiment logic lives in `backend/src/slr/experiment.py`, so these cells stay short\nand the science stays reviewable in one place instead of scattered across notebook state.\n\nTwo questions get answered, in order.\n\n**1. How much of the published accuracy is real?** Same backbone, same data, three protocols:\n\n| | protocol | what it measures |\n| --- | --- | --- |\n| A | random split | what most papers and Kaggle kernels report |\n| B | group split | sessions kept whole |\n| C | cross-corpus | tested on a corpus shot by different people |\n\n**2. Which architecture is actually best?** A search over the model zoo, ranked on\n**validation** only, with the test split touched once by the winner. Two of the\ncandidates are plain CNNs, deliberately: if a CNN ties the transformers, that is the\nfinding."
+ ],
+ [
+  "md",
+  "## 1. Environment and code"
+ ],
+ [
+  "code",
+  "!nvidia-smi -L\n!pip install -q timm kaggle\nimport torch; print(\"torch\", torch.__version__, \"| cuda\", torch.cuda.is_available())"
+ ],
+ [
+  "code",
+  "import os, sys\nfrom pathlib import Path\n\nREPO = \"https://github.com/AlgoArtist06/signer-honest-asl.git\"\nif not Path(\"signer-honest-asl\").exists():\n    !git clone -q $REPO\nos.chdir(\"/content/signer-honest-asl\")\nsys.path.insert(0, \"/content/signer-honest-asl/backend/src\")\n\nfrom slr import sources, data, leakage, model as M, train, evaluate, experiment\nprint(\"loaded slr from\", Path(experiment.__file__).parent)"
+ ],
+ [
+  "md",
+  "## 2. Kaggle credentials\n\n[kaggle.com/settings](https://www.kaggle.com/settings) -> **API** -> **Create Legacy API Key**\ndownloads `kaggle.json`. Paste the two values below, or upload the file.\n\nNothing here is committed: `dataset/raw/` and credentials are gitignored."
+ ],
+ [
+  "code",
+  "KAGGLE_USERNAME = \"\"   # e.g. \"ashutosh839\"\nKAGGLE_KEY      = \"\"   # the 32-char key from kaggle.json\n\nfrom pathlib import Path\nif KAGGLE_USERNAME and KAGGLE_KEY:\n    experiment.write_kaggle_credentials(KAGGLE_USERNAME, KAGGLE_KEY)\nelif not (Path.home() / \".kaggle\" / \"kaggle.json\").exists():\n    from google.colab import files\n    p = Path.home() / \".kaggle\"; p.mkdir(parents=True, exist_ok=True)\n    (p / \"kaggle.json\").write_bytes(files.upload()[\"kaggle.json\"])\n    (p / \"kaggle.json\").chmod(0o600)"
+ ],
+ [
+  "md",
+  "## 3. Data\n\nDownloads `asl_alphabet` (87k images, ~1.1 GB) and `asl_alphabet_test` (870 images shot\nby a different person), builds the manifest, and recovers capture sessions by clustering\nnear-duplicates.\n\nSession recovery is what makes protocol B possible at all: neither corpus ships signer\nlabels, so the sessions have to be inferred from the images themselves."
+ ],
+ [
+  "code",
+  "sources.main([\"list\"])"
+ ],
+ [
+  "code",
+  "experiment.run(\"data\", per_class=0)"
+ ],
+ [
+  "md",
+  "## 4. Protocol A - the leaky baseline\n\nA random split scatters each capture session across train and test, so near-identical\nframes sit on both sides. The audit reports exactly how contaminated the result is.\n\n`per_class` caps images per class by dropping **whole groups**, never individual frames,\nso subsampling cannot itself create or hide a leak."
+ ],
+ [
+  "code",
+  "PER_CLASS = 400      # whole groups only; set 0 to use all 87k images\nPRESET    = \"vit_small\"\nEPOCHS    = 4\n\nexperiment.run(\"A\", per_class=PER_CLASS, preset=PRESET, epochs=EPOCHS)"
+ ],
+ [
+  "md",
+  "## 5. Protocol B - honest in-corpus split\n\nSame corpus, same backbone, same epochs. The only change is that recovered sessions are\ndealt whole to exactly one of train / val / test."
+ ],
+ [
+  "code",
+  "experiment.run(\"B\", per_class=PER_CLASS, preset=PRESET, epochs=EPOCHS)"
+ ],
+ [
+  "md",
+  "## 6. Protocol C - cross-corpus\n\nTrain on `asl_alphabet`, test on `asl_alphabet_test`: different person, different room,\ndifferent camera. Validation is carved out of the training corpus, so the test corpus is\nuntouched until the final number.\n\nThis is signer-disjoint by construction, which matters because session recovery alone\ncannot guarantee signer disjointness - see `leakage.recover_groups` for the measurement\nthat establishes this."
+ ],
+ [
+  "code",
+  "experiment.run(\"C\", per_class=PER_CLASS, preset=PRESET, epochs=EPOCHS)"
+ ],
+ [
+  "md",
+  "## 7. The headline table"
+ ],
+ [
+  "code",
+  "experiment.summary()"
+ ],
+ [
+  "md",
+  "## 8. Architecture search\n\nRanked on validation macro-F1. Only the winner is run against the test split.\n\n`quick` is four models across the families and finishes in one session. `arch` is the\nfull eleven-model comparison and wants an A100."
+ ],
+ [
+  "code",
+  "print({k: v for k, v in M.SWEEPS.items()})"
+ ],
+ [
+  "code",
+  "SEARCH = \"quick\"     # \"quick\" | \"scale\" | \"arch\" | \"mobile\" | \"all\"\n\narch = experiment.run(\"arch\", per_class=PER_CLASS,\n                      presets=M.SWEEPS[SEARCH], epochs=EPOCHS)\nBEST = arch[\"winner\"]\nprint(\"winner:\", BEST, \"| test:\", arch[\"winner_test\"])"
+ ],
+ [
+  "md",
+  "### Reading the leaderboard\n\nThree things to check before quoting the top row:\n\n- **Did a CNN win?** `convnext_base` and `effnetv2_s` are controls. If one leads,\n  attention is not what carried this task.\n- **Did the language- or self-supervised models beat the ImageNet ones?** `siglip_base`,\n  `clip_base` and `dinov2_base` saw far more visual variety in pretraining. If they lead\n  on the cross-corpus test specifically, the finding is that pretraining diversity, not\n  architecture, buys robustness to a new signer.\n- **What did the parameters cost?** Compare `val_f1` against `secs_per_epoch`. The\n  deployment pick is the knee of that curve, not the top of the table."
+ ],
+ [
+  "code",
+  "import pandas as pd\n\nboard = pd.DataFrame(arch[\"leaderboard\"])\nboard[\"f1_per_Mparam\"] = (board.val_f1 / board.params_m * 100).round(3)\nboard"
+ ],
+ [
+  "md",
+  "## 9. Calibration and the abstention threshold\n\nTemperature is fitted on validation only. The risk-coverage table is where the app's\nconfidence threshold comes from: at a given coverage, this is the measured error rate\namong the answers the model is willing to give."
+ ],
+ [
+  "code",
+  "cal = experiment.run(\"cal\", per_class=PER_CLASS, winner=BEST)\ncal[\"test\"][\"risk_coverage\"]"
+ ],
+ [
+  "md",
+  "## 10. Take the model home\n\nDownloads the checkpoint plus its calibration report. Keep them together: the API reads\n`eval.json` from beside the `.pt` to get the temperature and threshold."
+ ],
+ [
+  "code",
+  "import shutil, json\nfrom pathlib import Path\nfrom google.colab import files\n\nck = Path(cal[\"checkpoint\"]).parent\nshutil.make_archive(\"slr_model\", \"zip\", ck)\nfiles.download(\"slr_model.zip\")\nprint(json.dumps(experiment.load()[\"stages\"], indent=2)[:2000])"
+ ]
+]
