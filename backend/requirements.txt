@@ -1,0 +1,10 @@
+# Colab / Kaggle notebooks already ship torch + torchvision + numpy + pillow.
+# Install the rest with:  pip install -r backend/requirements.txt
+timm>=1.0.9
+fastapi>=0.110
+uvicorn[standard]>=0.29
+python-multipart>=0.0.9
+pydantic>=2.6
+kaggle>=1.6
+huggingface-hub>=0.23
+pytest>=8.0

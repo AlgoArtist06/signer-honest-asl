@@ -1,0 +1,25 @@
+# data + artifacts, never commit
+dataset/raw/
+dataset/manifests/
+docs/pdf/
+runs/
+*.pt
+*.pth
+*.onnx
+*.zip
+*.tar.gz
+
+# python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.ipynb_checkpoints/
+*.egg-info/
+
+# os
+.DS_Store
+
+# pytest
+.pytest_cache/
