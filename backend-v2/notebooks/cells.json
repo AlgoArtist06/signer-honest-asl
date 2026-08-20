@@ -1,7 +1,7 @@
 [
  [
   "md",
-  "# Signer-honest ASL recognition\n\nRuns the full pipeline on a Colab GPU. Set **Runtime -> Change runtime type -> T4 GPU** first.\n\nThe experiment logic lives in `backend/src/slr/experiment.py`, so these cells stay short\nand the science stays reviewable in one place instead of scattered across notebook state.\n\nTwo questions get answered, in order.\n\n**1. How much of the published accuracy is real?** Same backbone, same data, three protocols:\n\n| | protocol | what it measures |\n| --- | --- | --- |\n| A | random split | what most papers and Kaggle kernels report |\n| B | group split | sessions kept whole |\n| C | cross-corpus | tested on a corpus shot by different people |\n\n**2. Which architecture is actually best?** A search over the model zoo, ranked on\n**validation** only, with the test split touched once by the winner. Two of the\ncandidates are plain CNNs, deliberately: if a CNN ties the transformers, that is the\nfinding."
+  "# Signer-honest ASL recognition\n\nRuns the full still-image pipeline on **this MacBook Pro**: Apple M4 Pro (12 CPU cores: 8P+4E, 16 GPU cores), 24 GB unified memory, PyTorch on **Metal / MPS**. There is no CUDA and no Colab T4 on this machine.\n\nSelect the kernel that uses `~/.venvs/slr` (Python 3.12) before running. Batch sizes in the zoo were sized for a 16 GB T4's discrete VRAM; here memory is shared with macOS, so the 448/518px models (`eva02_base`, `dinov2_*`, `vit_large`) may need a smaller batch if MPS runs out of memory.\n\nThe experiment logic lives in `backend-v2/src/slr/experiment.py`, so these cells stay short\nand the science stays reviewable in one place instead of scattered across notebook state.\n\nTwo questions get answered, in order.\n\n**1. How much of the published accuracy is real?** Same backbone, same data, three protocols:\n\n| | protocol | what it measures |\n| --- | --- | --- |\n| A | random split | what most papers and Kaggle kernels report |\n| B | group split | sessions kept whole |\n| C | cross-corpus | tested on a corpus shot by different people |\n\n**2. Which architecture is actually best?** A search over the model zoo, ranked on\n**validation** only, with the test split touched once by the winner. Two of the\ncandidates are plain CNNs, deliberately: if a CNN ties the transformers, that is the\nfinding."
  ],
  [
   "md",
@@ -9,19 +9,19 @@
  ],
  [
   "code",
-  "!nvidia-smi -L\n!pip install -q timm kaggle\nimport torch; print(\"torch\", torch.__version__, \"| cuda\", torch.cuda.is_available())"
+  "import platform, subprocess, torch\n\ndef _sysctl(key: str) -> str:\n    return subprocess.check_output([\"sysctl\", \"-n\", key], text=True).strip()\n\nprint(\"os:\", platform.platform())\nprint(\"chip:\", _sysctl(\"machdep.cpu.brand_string\"))\nprint(\"cpu cores:\", _sysctl(\"hw.ncpu\"))\nprint(\"memory_gb:\", int(_sysctl(\"hw.memsize\")) // 2**30)\nprint(\"torch\", torch.__version__,\n      \"| cuda\", torch.cuda.is_available(),\n      \"| mps\", torch.backends.mps.is_available())\nassert torch.backends.mps.is_available(), \"this notebook expects Apple Silicon MPS\""
  ],
  [
   "code",
-  "import os, sys\nfrom pathlib import Path\n\nREPO = \"https://github.com/AlgoArtist06/signer-honest-asl.git\"\nif not Path(\"signer-honest-asl\").exists():\n    !git clone -q $REPO\nos.chdir(\"/content/signer-honest-asl\")\nsys.path.insert(0, \"/content/signer-honest-asl/backend/src\")\n\nfrom slr import sources, data, leakage, model as M, train, evaluate, experiment\nprint(\"loaded slr from\", Path(experiment.__file__).parent)"
+  "import os, sys\nfrom pathlib import Path\n\nROOT = Path.cwd().resolve()\nfor p in [ROOT, *ROOT.parents]:\n    if (p / \"backend-v2\" / \"src\" / \"slr\").is_dir():\n        ROOT = p\n        break\nelse:\n    raise SystemExit(\"could not find backend-v2/src/slr; open the notebook from the repo\")\n\nos.chdir(ROOT)\nsys.path.insert(0, str(ROOT / \"backend-v2\" / \"src\"))\n\nfrom slr import sources, data, leakage, model as M, train, evaluate, experiment\nprint(\"repo\", ROOT)\nprint(\"device\", M.device())\nprint(\"loaded slr from\", Path(experiment.__file__).parent)"
  ],
  [
   "md",
-  "## 2. Kaggle credentials\n\nBoth corpora live on Kaggle, which refuses unauthenticated downloads.\n\nCredentials come from **Colab Secrets** (left sidebar, key icon) so that no key is ever\ntyped into a cell, saved into the notebook, or pushed to git. Add two secrets and enable\nnotebook access on both:\n\n| secret | value |\n| --- | --- |\n| `KAGGLE_USERNAME` | your Kaggle username |\n| `KAGGLE_KEY` | the 32-char key from `kaggle.json` |\n\n[kaggle.com/settings](https://www.kaggle.com/settings) -> **API** -> **Create Legacy API Key**\ndownloads `kaggle.json` if you need a fresh one."
+  "## 2. Kaggle credentials\n\nBoth corpora live on Kaggle, which refuses unauthenticated downloads.\n\nOn this machine, credentials live in `~/.kaggle/kaggle.json` (chmod 600). Nothing is\ntyped into a cell or saved into the notebook.\n\n[kaggle.com/settings](https://www.kaggle.com/settings) -> **API** -> **Create Legacy API Key**\ndownloads `kaggle.json` if you need a fresh one."
  ],
  [
   "code",
-  "from google.colab import userdata\n\nexperiment.wait_for_kaggle(userdata.get)"
+  "from pathlib import Path\n\nkaggle_json = Path.home() / \".kaggle\" / \"kaggle.json\"\nif kaggle_json.exists():\n    print(\"[kaggle] credentials present at\", kaggle_json)\nelse:\n    raise SystemExit(\n        \"missing ~/.kaggle/kaggle.json. Create a legacy API key at \"\n        \"https://www.kaggle.com/settings and copy it there (chmod 600).\"\n    )"
  ],
  [
   "md",
@@ -69,7 +69,7 @@
  ],
  [
   "md",
-  "## 8. Architecture search\n\nEvery backbone the reading list pointed at, ranked on validation macro-F1.\nOnly the winner is run against the test split.\n\nThe sweep is resumable: `runs/C_arch_leaderboard.json` is rewritten after each\ncandidate and re-read on restart, so a dropped session costs the model in flight,\nnot the sweep. Re-run this cell after a reconnect and it picks up where it stopped\n(re-run section 3 first, since the VM's disk is wiped with it)."
+  "## 8. Architecture search\n\nEvery backbone the reading list pointed at, ranked on validation macro-F1.\nOnly the winner is run against the test split.\n\nThe sweep is resumable: `runs/C_arch_leaderboard.json` is rewritten after each\ncandidate and re-read on restart, so a killed process costs the model in flight,\nnot the sweep. Re-run this cell and it picks up where it stopped."
  ],
  [
   "code",
@@ -77,7 +77,7 @@
  ],
  [
   "code",
-  "SEARCH = \"all\"      # \"quick\" | \"scale\" | \"arch\" | \"mobile\" | \"all\"\n\n# Cheapest first. A full-zoo sweep is longer than a free Colab session, and the\n# board is written after every candidate, so ordering by cost means a\n# disconnect costs the three 448/518px monsters rather than fifteen models.\nORDER = sorted(M.SWEEPS[SEARCH],\n               key=lambda k: (M.PRESETS[k].img_size, M.PRESETS[k].approx_params_m))\nprint(len(ORDER), \"candidates:\", ORDER)\n\narch = experiment.run(\"arch\", per_class=PER_CLASS, presets=ORDER, epochs=EPOCHS)\nBEST = arch[\"winner\"]\nprint(\"winner:\", BEST, \"| test:\", arch[\"winner_test\"])"
+  "SEARCH = \"all\"      # \"quick\" | \"scale\" | \"arch\" | \"mobile\" | \"all\"\n\n# Cheapest first on 24 GB unified memory: a full-zoo sweep is a long local run,\n# and the board is written after every candidate, so ordering by cost means a\n# stop costs the three 448/518px monsters rather than fifteen models.\nORDER = sorted(M.SWEEPS[SEARCH],\n               key=lambda k: (M.PRESETS[k].img_size, M.PRESETS[k].approx_params_m))\nprint(len(ORDER), \"candidates:\", ORDER)\n\narch = experiment.run(\"arch\", per_class=PER_CLASS, presets=ORDER, epochs=EPOCHS)\nBEST = arch[\"winner\"]\nprint(\"winner:\", BEST, \"| test:\", arch[\"winner_test\"])"
  ],
  [
   "md",
@@ -97,10 +97,10 @@
  ],
  [
   "md",
-  "## 10. Take the model home\n\n`slr_model.zip` holds the checkpoint plus its calibration report. Keep them together: the\nAPI reads `eval.json` from beside the `.pt` to get the temperature and threshold.\n\nThe download is left as a manual step so an unattended run does not stall on a browser\nprompt hours after everyone has stopped watching."
+  "## 10. Take the model home\n\n`slr_model.zip` holds the checkpoint plus its calibration report. Keep them together: the\nAPI reads `eval.json` from beside the `.pt` to get the temperature and threshold."
  ],
  [
   "code",
-  "import shutil, json\nfrom pathlib import Path\n\nck = Path(cal[\"checkpoint\"]).parent\nzipped = shutil.make_archive(\"/content/slr_model\", \"zip\", ck)\nprint(\"checkpoint bundle:\", zipped)\nprint(json.dumps(experiment.load()[\"stages\"], indent=2)[:2000])\n\n# Download it with the file browser in the left sidebar, or uncomment:\n# from google.colab import files; files.download(zipped)"
+  "import shutil, json\nfrom pathlib import Path\n\nck = Path(cal[\"checkpoint\"]).parent\nzipped = shutil.make_archive(str(ROOT / \"slr_model\"), \"zip\", ck)\nprint(\"checkpoint bundle:\", zipped)\nprint(json.dumps(experiment.load()[\"stages\"], indent=2)[:2000])"
  ]
 ]

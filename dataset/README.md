@@ -40,4 +40,4 @@ Splits are stored in the manifest rather than as separate directories, so a spli
 
 `asl_alphabet` alone is ~1.1 GB compressed and ~2 GB extracted.
 The full registry is well over 3 GB.
-Download on Colab, not on a laptop.
+This Mac has the disk for it; run the download from the notebooks or `python -m slr.sources`.

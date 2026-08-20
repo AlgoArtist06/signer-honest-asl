@@ -118,8 +118,8 @@ backend-v2/
 
 ## Running it
 
-Training happens on Colab.
-Open `backend-v2/notebooks/video_experiments.ipynb`, set the runtime to T4, and work down the cells.
+Training runs on this MacBook Pro (Apple M4 Pro, 24 GB unified memory, PyTorch MPS).
+Open `backend-v2/notebooks/video_experiments.ipynb` with the `~/.venvs/slr` kernel and work down the cells.
 
 The test suite needs no dataset, no GPU, no network, and no MediaPipe:
 

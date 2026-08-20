@@ -23,3 +23,6 @@ venv/
 
 # pytest
 .pytest_cache/
+
+# leftover from the old Colab clone cell; never commit a nested checkout
+backend/notebooks/signer-honest-asl/

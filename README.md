@@ -108,7 +108,7 @@ backend/
     evaluate.py   temperature scaling, ECE, risk-coverage, per-class confusion
     api.py        FastAPI service the React Native app calls
   tests/          19 tests, no dataset or GPU needed, ~20 seconds
-  notebooks/      experiments.ipynb - the full pipeline end to end on a Colab GPU
+  notebooks/      experiments.ipynb - the full pipeline end to end on this Mac (M4 Pro, MPS)
 dataset/
   raw/            downloaded corpora (gitignored)
   manifests/      CSV: path, label, source, group, split (gitignored)
@@ -120,8 +120,8 @@ docs/
 
 ## Running it
 
-Training happens on Colab.
-Open `backend/notebooks/experiments.ipynb`, set the runtime to GPU, and work down the cells.
+Training runs on this MacBook Pro (Apple M4 Pro, 24 GB unified memory, PyTorch MPS).
+Open `backend/notebooks/experiments.ipynb` with the `~/.venvs/slr` kernel and work down the cells.
 It downloads the corpora, recovers groups, runs protocols A, B and C, sweeps model scale, searches architectures, calibrates, and hands back a checkpoint.
 
 The search is driven from the command line too:
@@ -136,7 +136,7 @@ python -m slr.train dataset/manifests/cross_corpus.csv --preset mobile  # on-dev
 Each writes a leaderboard with validation score, parameter count, and seconds per epoch, names the winner, and evaluates that one on test.
 
 The leaderboard is rewritten after every candidate and re-read on restart, so a sweep that outlives its session resumes instead of starting over.
-`--preset all` runs the whole zoo; on a single T4 that is several sessions' work, and losing one costs the model in flight rather than the sweep.
+`--preset all` runs the whole zoo; on 24 GB unified memory that is a long local run, and losing one costs the model in flight rather than the sweep. The 448/518px models may need a smaller batch than the T4 presets.
 
 Locally, for inference and tests:
 

@@ -30,10 +30,16 @@ def build(src: str) -> dict:
     for kind, body in cells:
         out.append(md(body) if kind == "md" else code(body))
     return {"cells": out,
-            "metadata": {"accelerator": "GPU",
-                         "colab": {"provenance": [], "gpuType": "T4"},
-                         "kernelspec": {"display_name": "Python 3", "name": "python3"},
-                         "language_info": {"name": "python"}},
+            "metadata": {"kernelspec": {"display_name": "Python 3.12 (slr)",
+                                        "language": "python",
+                                        "name": "python3"},
+                         "language_info": {"name": "python"},
+                         "hardware": {"machine": "MacBook Pro",
+                                      "chip": "Apple M4 Pro",
+                                      "cpu_cores": "12 (8P+4E)",
+                                      "gpu_cores": 16,
+                                      "memory_gb": 24,
+                                      "torch_device": "mps"}},
             "nbformat": 4, "nbformat_minor": 0}
 
 
