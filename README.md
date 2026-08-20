@@ -86,6 +86,15 @@ Two plain CNNs are in the search as controls rather than filler: if `convnext_ba
 `model.attention_rollout` implements Abnar & Zuidema, and `POST /predict?explain=true` returns the heatmap overlaid on the photo.
 It is a feature for the app and a diagnostic for us: a model attending to the wall behind the signer is visible immediately.
 
+## Two backends
+
+`backend/` classifies a **still photo** of a handshape into 29 fingerspelling classes.
+
+`backend-v2/` is a superset: everything above, plus isolated **sign** recognition from a video clip.
+It exists because the still backend's honest split had to *recover* capture sessions, and `signer_check` shows that recovery fragments 211 of 217 real signers.
+The video corpora ship real signer ids, so there the signer-disjoint split is exact rather than approximated.
+See `backend-v2/README.md`.
+
 ## Layout
 
 ```
