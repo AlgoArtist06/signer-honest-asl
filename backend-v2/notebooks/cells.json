@@ -17,11 +17,11 @@
  ],
  [
   "md",
-  "## 2. Kaggle credentials\n\nBoth corpora live on Kaggle, which refuses unauthenticated downloads.\n\nOn this machine, credentials live in `~/.kaggle/kaggle.json` (chmod 600). Nothing is\ntyped into a cell or saved into the notebook.\n\n[kaggle.com/settings](https://www.kaggle.com/settings) -> **API** -> **Create Legacy API Key**\ndownloads `kaggle.json` if you need a fresh one."
+  "## 2. Kaggle credentials\n\nBoth corpora live on Kaggle, which refuses unauthenticated downloads.\n\nOn this machine, credentials live in `~/.kaggle/kaggle.json` (chmod 600). Nothing is\ntyped into a cell or saved into the notebook. If the file is missing, this cell waits\nand also accepts `~/Downloads/kaggle.json` or `KAGGLE_USERNAME` / `KAGGLE_KEY` in the\nenvironment.\n\n[kaggle.com/settings](https://www.kaggle.com/settings) -> **API** -> **Create Legacy API Key**\ndownloads `kaggle.json` if you need a fresh one."
  ],
  [
   "code",
-  "from pathlib import Path\n\nkaggle_json = Path.home() / \".kaggle\" / \"kaggle.json\"\nif kaggle_json.exists():\n    print(\"[kaggle] credentials present at\", kaggle_json)\nelse:\n    raise SystemExit(\n        \"missing ~/.kaggle/kaggle.json. Create a legacy API key at \"\n        \"https://www.kaggle.com/settings and copy it there (chmod 600).\"\n    )"
+  "experiment.wait_for_kaggle()"
  ],
  [
   "md",

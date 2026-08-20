@@ -27,6 +27,7 @@ from __future__ import annotations
 import json
 import os
 import random
+import shutil
 import time
 from collections import defaultdict
 from pathlib import Path
@@ -55,33 +56,65 @@ def save(state: dict) -> None:
     print(f"[state] -> {RESULTS}")
 
 
+def _kaggle_path() -> Path:
+    return Path.home() / ".kaggle" / "kaggle.json"
+
+
 def write_kaggle_credentials(username: str, key: str) -> None:
-    p = Path.home() / ".kaggle" / "kaggle.json"
+    p = _kaggle_path()
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(json.dumps({"username": username, "key": key}))
     p.chmod(0o600)
     print(f"[kaggle] credentials for {username} written to {p}")
 
 
-def wait_for_kaggle(get, poll: int = 30) -> None:
-    """Block until Colab Secrets carry Kaggle credentials, then write them.
-
-    `get` is `google.colab.userdata.get`, passed in so this module keeps no
-    dependency on Colab. An unattended run should not die because the secrets
-    were not in place at the moment the cell started; it should sit still and
-    pick them up as soon as they are.
-    """
-    if (Path.home() / ".kaggle" / "kaggle.json").exists():
+def _install_kaggle_if_available(get=None) -> bool:
+    """Return True once ~/.kaggle/kaggle.json exists. Never prints secrets."""
+    dest = _kaggle_path()
+    if dest.exists():
+        dest.chmod(0o600)
         print("[kaggle] credentials already present")
-        return
-    while True:
+        return True
+    downloads = Path.home() / "Downloads" / "kaggle.json"
+    if downloads.exists():
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(downloads.read_bytes())
+        dest.chmod(0o600)
+        print(f"[kaggle] copied credentials from {downloads}")
+        return True
+    user = os.environ.get("KAGGLE_USERNAME")
+    key = os.environ.get("KAGGLE_KEY")
+    if user and key:
+        write_kaggle_credentials(user, key)
+        return True
+    if get is not None:
         try:
             write_kaggle_credentials(get("KAGGLE_USERNAME"), get("KAGGLE_KEY"))
-            return
-        except Exception as e:
-            print(f"[kaggle] waiting for KAGGLE_USERNAME / KAGGLE_KEY in Colab "
-                  f"Secrets ({type(e).__name__}); retrying in {poll}s", flush=True)
-            time.sleep(poll)
+            return True
+        except Exception:
+            return False
+    return False
+
+
+def wait_for_kaggle(get=None, poll: int = 5) -> None:
+    """Block until Kaggle credentials are on disk, then continue.
+
+    Looks for, in order: ~/.kaggle/kaggle.json, ~/Downloads/kaggle.json,
+    KAGGLE_USERNAME / KAGGLE_KEY in the environment, then an optional `get`
+    callable (Colab Secrets). Does not raise SystemExit, so a notebook kernel
+    is not killed while the file is still missing.
+    """
+    dest = _kaggle_path()
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    if _install_kaggle_if_available(get):
+        return
+    print("[kaggle] missing credentials. Create a legacy API token at")
+    print("         https://www.kaggle.com/settings  -> API")
+    print(f"         then put kaggle.json at {dest} (chmod 600), or drop it")
+    print("         in ~/Downloads, or export KAGGLE_USERNAME and KAGGLE_KEY.")
+    print(f"[kaggle] waiting; re-checking every {poll}s", flush=True)
+    while not _install_kaggle_if_available(get):
+        time.sleep(poll)
 
 
 # --- sampling ----------------------------------------------------------------

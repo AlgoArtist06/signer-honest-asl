@@ -17,11 +17,11 @@
  ],
  [
   "md",
-  "## 2. Kaggle credentials\n\nPopSign is a Kaggle **competition** dataset, so besides the API token you must accept the\ncompetition rules once at\n[kaggle.com/competitions/asl-signs/rules](https://www.kaggle.com/competitions/asl-signs/rules).\nThere is no API for accepting rules; a 403 here is a human step, not a bug.\n\nOn this machine, credentials live in `~/.kaggle/kaggle.json` (chmod 600). No key is ever\ntyped into a cell."
+  "## 2. Kaggle credentials\n\nPopSign is a Kaggle **competition** dataset, so besides the API token you must accept the\ncompetition rules once at\n[kaggle.com/competitions/asl-signs/rules](https://www.kaggle.com/competitions/asl-signs/rules).\nThere is no API for accepting rules; a 403 here is a human step, not a bug.\n\nOn this machine, credentials live in `~/.kaggle/kaggle.json` (chmod 600). No key is ever\ntyped into a cell. If the file is missing, this cell waits and also accepts\n`~/Downloads/kaggle.json` or `KAGGLE_USERNAME` / `KAGGLE_KEY` in the environment."
  ],
  [
   "code",
-  "from pathlib import Path\n\nkaggle_json = Path.home() / \".kaggle\" / \"kaggle.json\"\nif kaggle_json.exists():\n    print(\"[kaggle] credentials present at\", kaggle_json)\nelse:\n    raise SystemExit(\n        \"missing ~/.kaggle/kaggle.json. Create a legacy API key at \"\n        \"https://www.kaggle.com/settings and copy it there (chmod 600).\"\n    )"
+  "from slr import experiment\n\nexperiment.wait_for_kaggle()"
  ],
  [
   "md",
