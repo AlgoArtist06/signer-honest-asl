@@ -26,7 +26,7 @@ import torch
 from PIL import Image
 from torch.utils.data import DataLoader, Dataset
 
-from .sources import CLASSES, REGISTRY
+from .sources import REGISTRY
 
 IMAGENET_MEAN = (0.485, 0.456, 0.406)
 IMAGENET_STD = (0.229, 0.224, 0.225)
@@ -34,54 +34,160 @@ IMAGENET_STD = (0.229, 0.224, 0.225)
 
 # --- splitting ---------------------------------------------------------------
 
+def _deal_units(rows: list[dict], val: float, test: float, seed: int,
+                key: str = "group") -> list[dict]:
+    """Deal whole units (`group` or `signer`) to ~70/15/15 without inversion.
+
+    A first-fit walk that fills val then train fails on heavy-tailed sessions:
+    one recovered component is handed to val, val becomes most of the corpus,
+    and train is left with a handful of leftover classes. That is the 262-train
+    / 11k-val failure. This dealer instead:
+
+      * targets train:(1-val-test), val, test (defaults 70/15/15)
+      * places largest units first into the split furthest below its target
+      * never places a unit into val/test when that would make the split
+        larger than train while train is still short of its target
+      * never moves a class's last unit out of train
+      * prefers a split that is still missing a class the unit would add
+    """
+    units: dict[str, list[int]] = defaultdict(list)
+    for i, r in enumerate(rows):
+        units[str(r[key])].append(i)
+
+    rng = random.Random(seed)
+    names = sorted(units)
+    rng.shuffle(names)
+
+    n = len(rows)
+    targets = {"train": (1.0 - val - test) * n, "val": val * n, "test": test * n}
+    filled = {"train": 0, "val": 0, "test": 0}
+    assigned: dict[str, str] = {}
+
+    def labels_of(u: str) -> set[str]:
+        return {rows[i]["label"] for i in units[u]}
+
+    def class_in(split: str) -> set[str]:
+        out: set[str] = set()
+        for u, s in assigned.items():
+            if s == split:
+                out |= labels_of(u)
+        return out
+
+    def unassigned_with(lab: str, exclude: str | None = None) -> list[str]:
+        return [u for u in units
+                if u not in assigned and u != exclude and lab in labels_of(u)]
+
+    def legal(u: str, split: str) -> bool:
+        size = len(units[u])
+        if split != "train" and targets[split] <= 0:
+            return False
+        if split != "train":
+            would = filled[split] + size
+            if filled["train"] < targets["train"] and would > filled["train"]:
+                return False
+            if filled[split] >= targets[split] and filled["train"] < targets["train"]:
+                return False
+            for lab in labels_of(u):
+                if lab not in class_in("train") and not unassigned_with(lab, exclude=u):
+                    return False
+        return True
+
+    def pick(u: str) -> str:
+        scored: list[tuple[float, str]] = []
+        for split in ("train", "val", "test"):
+            if not legal(u, split):
+                continue
+            size_def = targets[split] - filled[split]
+            cover = sum(1 for lab in labels_of(u) if lab not in class_in(split))
+            # train wins ties so leftover capacity stays where the model learns
+            tie = 0 if split == "train" else (1 if split == "val" else 2)
+            scored.append((-(size_def + 50.0 * cover), tie, split))
+        if not scored:
+            return "train"
+        scored.sort()
+        return scored[0][2]
+
+    for u in sorted(names, key=lambda g: (-len(units[g]), g)):
+        dest = pick(u)
+        assigned[u] = dest
+        filled[dest] += len(units[u])
+
+    # Repair: every class that appears in `rows` must appear in train.
+    present = {r["label"] for r in rows}
+    for lab in sorted(present):
+        if lab in class_in("train"):
+            continue
+        cands = [(len(units[u]), u) for u, s in assigned.items()
+                 if s != "train" and lab in labels_of(u)]
+        if not cands:
+            continue
+        _, u = min(cands)
+        old = assigned[u]
+        assigned[u] = "train"
+        filled[old] -= len(units[u])
+        filled["train"] += len(units[u])
+
+    for u, dest in assigned.items():
+        for i in units[u]:
+            rows[i]["split"] = dest
+    return rows
+
+
 def split_by_group(rows: list[dict], val: float = 0.15, test: float = 0.15,
                    seed: int = 0) -> list[dict]:
     """Assign splits so that no group straddles a boundary.
 
-    Greedy: shuffle the groups, then walk them filling test, then val, then the
-    rest into train. Greedy on group size rather than exact stratification -
-    class balance is checked and warned about afterwards rather than optimised
-    for, because forcing per-class balance would require splitting groups, which
-    is the exact thing we are refusing to do.
+    Groups are dealt whole. Placement is stratified by class so train always
+    contains every letter present in `rows`, and sizes track 70/15/15 unless a
+    single session is larger than those fractions (in which case that session
+    stays in train rather than emptying it).
     """
-    groups: dict[str, list[int]] = defaultdict(list)
-    for i, r in enumerate(rows):
-        groups[r["group"]].append(i)
-
-    names = sorted(groups)
-    random.Random(seed).shuffle(names)          # tie-break between equal sizes
-
-    n = len(rows)
-    targets = {"train": (1 - val - test) * n, "val": val * n, "test": test * n}
-    filled = {"train": 0, "val": 0, "test": 0}
-
-    # Largest group first, into whichever split is furthest below its target.
-    #
-    # A first-fit walk that filled test, then val, then train looks reasonable
-    # until group sizes are heavy-tailed, which after `leakage.recover_groups`
-    # they always are: on `asl_alphabet` 87k frames collapse into 191 sessions
-    # and a handful of those hold nearly all of it. First-fit handed one such
-    # session to test, blew the 15% budget by an order of magnitude in a single
-    # step, and left train with no rows at all. Placing the biggest session
-    # first, where the deficit is largest, keeps it in train where 70% of the
-    # budget is and fills val and test from the tail.
-    for g in sorted(names, key=lambda g: -len(groups[g])):
-        s = max(filled, key=lambda k: targets[k] - filled[k])
-        for i in groups[g]:
-            rows[i]["split"] = s
-        filled[s] += len(groups[g])
-
+    _deal_units(rows, val, test, seed, key="group")
     _report(rows)
     return rows
 
 
+def split_random_stratified(rows: list[dict], val: float = 0.15, test: float = 0.15,
+                            seed: int = 0) -> list[dict]:
+    """Per-class 70/15/15. Sessions *are* allowed to straddle; that is protocol A.
+
+    Stratifying by label (not group) is what keeps all 29 classes in train when
+    a plain `random() < 0.7` draw would otherwise miss a rare letter.
+    """
+    rng = random.Random(seed)
+    by_label: dict[str, list[dict]] = defaultdict(list)
+    for r in rows:
+        by_label[r["label"]].append(r)
+    for items in by_label.values():
+        rng.shuffle(items)
+        n = len(items)
+        n_test = int(round(n * test))
+        n_val = int(round(n * val))
+        n_train = n - n_val - n_test
+        if n_train < 1 and n:
+            steal = "val" if n_val else "test"
+            if steal == "val":
+                n_val -= 1
+            else:
+                n_test -= 1
+            n_train += 1
+        for i, r in enumerate(items):
+            r["split"] = ("train" if i < n_train
+                          else "val" if i < n_train + n_val
+                          else "test")
+    _report(rows, allow_straddle=True)
+    return rows
+
+
 def split_cross_source(rows: list[dict], train_sources: list[str],
-                       test_sources: list[str], val: float = 0.1,
+                       test_sources: list[str], val: float = 0.15,
                        seed: int = 0) -> list[dict]:
     """Train on one set of corpora, test on a disjoint set.
 
     Validation is carved group-disjointly out of the *training* corpora, so the
-    test corpora stay completely untouched until the final evaluation.
+    test corpora stay completely untouched until the final evaluation. The carve
+    uses the same train-first dealer as `split_by_group` so a giant recovered
+    session cannot be parked in val and starve train of whole letters.
     """
     overlap = set(train_sources) & set(test_sources)
     if overlap:
@@ -100,40 +206,34 @@ def split_cross_source(rows: list[dict], train_sources: list[str],
     if dropped:
         print(f"[split] ignoring sources not named: {dict(dropped)}")
 
-    train_rows = [r for r in keep if r["split"] == "train"]
-    groups = sorted({r["group"] for r in train_rows})
-    random.Random(seed).shuffle(groups)
-    quota, taken = val * len(train_rows), 0
-    val_groups: set[str] = set()
-    for g in groups:
-        if taken >= quota:
-            break
-        val_groups.add(g)
-        taken += sum(1 for r in train_rows if r["group"] == g)
-    for r in train_rows:
-        if r["group"] in val_groups:
-            r["split"] = "val"
+    train_rows = [r for r in keep if r["source"] in train_sources]
+    _deal_units(train_rows, val=val, test=0.0, seed=seed, key="group")
+    for r in keep:
+        if r["source"] in test_sources:
+            r["split"] = "test"
 
     _report(keep)
     return keep
 
 
-def _report(rows: list[dict]) -> None:
+def _report(rows: list[dict], allow_straddle: bool = False) -> None:
     by_split = Counter(r["split"] for r in rows)
     print(f"[split] {dict(by_split)}")
+    vocab = {r["label"] for r in rows}
     for s in ("train", "val", "test"):
         sub = [r for r in rows if r["split"] == s]
         if not sub:
             continue
-        missing = set(CLASSES) - {r["label"] for r in sub}
+        missing = vocab - {r["label"] for r in sub}
         g = len({r["group"] for r in sub})
         print(f"[split]   {s}: {len(sub)} imgs, {g} groups, "
-              f"{len(CLASSES) - len(missing)}/{len(CLASSES)} classes"
+              f"{len(vocab) - len(missing)}/{len(vocab)} classes"
               + (f", MISSING {sorted(missing)}" if missing else ""))
-    # The invariant this whole module exists to guarantee.
     seen: dict[str, str] = {}
     for r in rows:
         if r["split"] and seen.setdefault(r["group"], r["split"]) != r["split"]:
+            if allow_straddle:
+                break
             raise AssertionError(f"group {r['group']} straddles splits - split is invalid")
 
 

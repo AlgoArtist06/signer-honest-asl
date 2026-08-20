@@ -134,6 +134,8 @@ def test_signer_split_survives_one_signer_dominating_the_corpus():
     from collections import Counter
     counts = Counter(r["split"] for r in rows)
     assert all(counts[s] > 0 for s in ("train", "val", "test")), dict(counts)
+    assert counts["train"] > counts["val"]
+    assert counts["train"] > counts["test"]
 
 
 def test_signer_split_refuses_a_corpus_with_no_signer_labels():

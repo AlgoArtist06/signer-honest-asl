@@ -20,8 +20,7 @@ only and never the thing a headline number is measured on.
 from __future__ import annotations
 
 import csv
-import random
-from collections import Counter, defaultdict
+from collections import Counter
 from pathlib import Path
 
 import numpy as np
@@ -29,6 +28,7 @@ import torch
 from torch.utils.data import DataLoader, Dataset
 
 from . import clips, landmarks
+from .data import _deal_units
 from .sources import DEFAULT_ROOT, REGISTRY
 
 MANIFEST_COLS = ["path", "label", "label_idx", "source", "signer", "group", "split"]
@@ -181,11 +181,9 @@ def split_by_signer(rows: list[dict], val: float = 0.15, test: float = 0.15,
                     seed: int = 0) -> list[dict]:
     """Deal whole signers to train/val/test. Exact, not recovered.
 
-    Signers are placed largest-first into whichever split is furthest below its
-    target. A first-fit walk would hand an unusually prolific signer to
-    whichever split it reached first and blow that split's budget in one go -
-    the failure the image-side group split hit on `asl_alphabet`, where one
-    recovered session held most of the corpus and emptied train entirely.
+    Signers are dealt whole with the same train-first, class-aware dealer as
+    the image-side group split: ~70/15/15, no inverted val, every gloss that
+    a signer carries still appears in train.
     """
     missing = [r for r in rows if not r.get("signer")]
     if missing:
@@ -195,22 +193,7 @@ def split_by_signer(rows: list[dict], val: float = 0.15, test: float = 0.15,
             "train-only source, or split a corpus that ships signer labels."
         )
 
-    by_signer: dict[str, list[int]] = defaultdict(list)
-    for i, r in enumerate(rows):
-        by_signer[r["signer"]].append(i)
-
-    names = sorted(by_signer)
-    random.Random(seed).shuffle(names)                 # tie-break only
-    n = len(rows)
-    targets = {"train": (1 - val - test) * n, "val": val * n, "test": test * n}
-    filled = {"train": 0, "val": 0, "test": 0}
-
-    for s in sorted(names, key=lambda g: -len(by_signer[g])):
-        dest = max(filled, key=lambda k: targets[k] - filled[k])
-        for i in by_signer[s]:
-            rows[i]["split"] = dest
-        filled[dest] += len(by_signer[s])
-
+    _deal_units(rows, val, test, seed, key="signer")
     _report(rows)
     return rows
 

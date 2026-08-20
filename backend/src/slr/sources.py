@@ -208,7 +208,8 @@ def download(name: str, root: Path = DEFAULT_ROOT) -> Path:
                 "Create New Token."
             )
         subprocess.run(
-            ["kaggle", "datasets", "download", "-d", src.ref, "-p", str(dest), "--unzip"],
+            [sys.executable, "-m", "kaggle", "datasets", "download",
+             "-d", src.ref, "-p", str(dest), "--unzip"],
             check=True,
         )
     elif src.kind == "hf":

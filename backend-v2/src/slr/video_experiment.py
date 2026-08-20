@@ -37,6 +37,7 @@ from pathlib import Path
 import torch
 
 from . import evaluate, sources, video_data, video_model as VM, video_train
+from .data import split_random_stratified
 
 RUNS = Path("runs")
 RESULTS = RUNS / "video_results.json"
@@ -80,13 +81,24 @@ def subsample(rows: list[dict], per_class: int, seed: int = 0) -> list[dict]:
     for sign, signers in by_sign.items():
         names = sorted(signers)
         rng.shuffle(names)
-        n = 0
-        for s in names:
-            if n >= per_class:
-                break
-            take = signers[s][: per_class - n]
+        n_parts = min(len(names), 3)
+        base, extra = divmod(per_class, n_parts)
+        budgets = [base + (1 if i < extra else 0) for i in range(n_parts)]
+        taken_from: dict[str, int] = {}
+        for s, b in zip(names, budgets):
+            take = signers[s][:b]
             kept += take
-            n += len(take)
+            taken_from[s] = len(take)
+        n = sum(taken_from.values())
+        if n < per_class:
+            for s in names:
+                if n >= per_class:
+                    break
+                start = taken_from.get(s, 0)
+                extra_take = signers[s][start:start + (per_class - n)]
+                kept += extra_take
+                taken_from[s] = start + len(extra_take)
+                n += len(extra_take)
     print(f"[sample] {len(rows)} -> {len(kept)} clips (<={per_class}/sign)")
     return kept
 
@@ -135,11 +147,7 @@ def stage_R(per_class: int, preset: str, epochs: int, workers: int = 2) -> dict:
     that number is all of them.
     """
     rows = _rows(per_class)
-    rng = random.Random(0)
-    for r in rows:
-        x = rng.random()
-        r["split"] = "train" if x < 0.7 else ("val" if x < 0.85 else "test")
-    video_data._report(rows)
+    split_random_stratified(rows, val=0.15, test=0.15, seed=0)
     res = video_train.train_one(rows, preset, epochs, RUNS, workers, tag="R_random")
     return _result(rows, res)
 

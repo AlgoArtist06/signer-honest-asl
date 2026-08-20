@@ -120,16 +120,14 @@ def wait_for_kaggle(get=None, poll: int = 5) -> None:
 # --- sampling ----------------------------------------------------------------
 
 def subsample(rows: list[dict], per_class: int, seed: int = 0) -> list[dict]:
-    """Cap images per class, dealing whole sessions wherever one fits.
+    """Cap images per class, spreading the budget across sessions when possible.
 
-    Sessions are dealt whole so a subsample can never split one across the
-    train/test boundary. On `asl_alphabet` a recovered session runs to thousands
-    of frames, so whole sessions alone cannot honour a cap of a few hundred -
-    taking one session already overshoots by an order of magnitude. Where that
-    happens a contiguous *prefix* of the session is kept instead. That is still
-    one session, still all-in or all-out of any split, and still an unbroken run
-    of near-identical frames, so protocol A's contamination is preserved rather
-    than thinned away by the sampling.
+    Sessions are never shuffled internally: a contiguous prefix is kept so a
+    subsample cannot itself create or hide a leak. When a class has several
+    recovered sessions they share the cap (up to three) so a later 70/15/15
+    group split can put that class in train, val, and test. A single oversized
+    session still falls back to one prefix, which is the only way to honour a
+    cap of a few hundred on a session of thousands of frames.
     """
     if not per_class:
         return rows
@@ -142,13 +140,24 @@ def subsample(rows: list[dict], per_class: int, seed: int = 0) -> list[dict]:
     for label, groups in by_class_group.items():
         names = sorted(groups)
         rng.shuffle(names)
-        n = 0
-        for g in names:
-            if n >= per_class:
-                break
-            take = groups[g][: per_class - n]
+        n_parts = min(len(names), 3)
+        base, extra = divmod(per_class, n_parts)
+        budgets = [base + (1 if i < extra else 0) for i in range(n_parts)]
+        taken_from: dict[str, int] = {}
+        for g, b in zip(names, budgets):
+            take = groups[g][:b]
             kept += take
-            n += len(take)
+            taken_from[g] = len(take)
+        n = sum(taken_from.values())
+        if n < per_class:
+            for g in names:
+                if n >= per_class:
+                    break
+                start = taken_from.get(g, 0)
+                extra_take = groups[g][start:start + (per_class - n)]
+                kept += extra_take
+                taken_from[g] = start + len(extra_take)
+                n += len(extra_take)
     print(f"[sample] {len(rows)} -> {len(kept)} images "
           f"(<={per_class}/class, whole groups only)")
     return kept
@@ -205,10 +214,7 @@ def _protocol_result(rows: list[dict], res: dict, rep: dict) -> dict:
 def stage_A(per_class: int, preset: str, epochs: int, workers: int = 2) -> dict:
     """Random split. Sessions are scattered across train and test on purpose."""
     rows = _rows(per_class, TRAIN_CORPUS)
-    rng = random.Random(0)
-    for r in rows:
-        x = rng.random()
-        r["split"] = "train" if x < 0.7 else ("val" if x < 0.85 else "test")
+    data.split_random_stratified(rows, val=0.15, test=0.15, seed=0)
     rep = leakage.audit(rows, max_dist=6, workers=8)
     res = train.train_one(rows, preset, epochs, RUNS, workers, tag="A_random")
     return _protocol_result(rows, res, rep)

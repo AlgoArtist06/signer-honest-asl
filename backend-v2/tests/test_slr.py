@@ -105,7 +105,7 @@ def _write_corpus(root: Path, source: str, n_groups: int, per_group: int) -> lis
 
 
 def test_group_split_never_lets_a_group_straddle(tmp_path):
-    rows = _write_corpus(tmp_path, "synth", n_groups=30, per_group=6)
+    rows = _write_corpus(tmp_path, "synth", n_groups=87, per_group=6)
     data.split_by_group(rows, val=0.2, test=0.2, seed=3)
     seen = {}
     for r in rows:
@@ -120,7 +120,7 @@ def test_random_split_leaks_and_group_split_does_not(tmp_path):
     train and test, so the audit should find near-duplicates for most test
     images. A group split keeps sessions whole, so it should find almost none.
     """
-    rows = _write_corpus(tmp_path, "synth", n_groups=25, per_group=8)
+    rows = _write_corpus(tmp_path, "synth", n_groups=40, per_group=8)
 
     rng = random.Random(0)
     for r in rows:
@@ -401,3 +401,58 @@ def test_group_split_survives_one_session_holding_most_of_the_corpus():
     # the invariant the whole split exists to preserve
     for g in {r["group"] for r in rows}:
         assert len({r["split"] for r in rows if r["group"] == g}) == 1
+
+
+def _row(path, label, group, source="a"):
+    return {"path": path, "label": label, "label_idx": 0,
+            "source": source, "group": group, "split": ""}
+
+
+def test_group_split_keeps_every_class_in_train_and_does_not_invert():
+    """The failure that produced ~4% accuracy: a giant session of ten letters
+    was dealt to val (11k images) and train kept 262 images of the other 19."""
+    missing = list("ABIJKLOS UX".replace(" ", ""))
+    others = [c for c in sources.CLASSES if c not in missing]
+    rows = []
+    for lab in missing:
+        rows += [_row(f"{lab}_{i}.jpg", lab, "huge") for i in range(1000)]
+    for i, lab in enumerate(others):
+        rows += [_row(f"{lab}_{j}.jpg", lab, f"small{i}") for j in range(14)]
+
+    data.split_by_group(rows, val=0.15, test=0.15, seed=0)
+    n = Counter(r["split"] for r in rows)
+    assert n["train"] > n["val"], dict(n)
+    assert n["train"] > n["test"], dict(n)
+    train_labels = {r["label"] for r in rows if r["split"] == "train"}
+    assert train_labels == {r["label"] for r in rows}
+
+
+def test_cross_source_val_does_not_swallow_the_training_corpus():
+    """First-fit val carving assigned the first shuffled group to val. When that
+    group was a giant recovered session, train lost ten classes."""
+    rows = []
+    for lab in sources.CLASSES:
+        rows += [_row(f"tr_{lab}_{i}.jpg", lab, "huge_train", "a") for i in range(400)]
+        rows += [_row(f"tr_{lab}_s{i}.jpg", lab, f"small_{lab}", "a") for i in range(20)]
+        rows += [_row(f"te_{lab}_{i}.jpg", lab, f"hold_{lab}", "b") for i in range(10)]
+
+    kept = data.split_cross_source(rows, ["a"], ["b"], val=0.15, seed=0)
+    train = [r for r in kept if r["split"] == "train"]
+    val = [r for r in kept if r["split"] == "val"]
+    test = [r for r in kept if r["split"] == "test"]
+    assert {r["source"] for r in test} == {"b"}
+    assert len(train) > len(val), (len(train), len(val))
+    assert {r["label"] for r in train} == set(sources.CLASSES)
+
+
+def test_random_stratified_split_covers_every_class_70_15_15():
+    rows = []
+    for lab in sources.CLASSES:
+        rows += [_row(f"{lab}_{i}.jpg", lab, f"g{lab}_{i}") for i in range(40)]
+    data.split_random_stratified(rows, val=0.15, test=0.15, seed=0)
+    n = Counter(r["split"] for r in rows)
+    assert n["train"] > n["val"] >= n["test"] or n["train"] > n["test"]
+    for split in ("train", "val", "test"):
+        assert {r["label"] for r in rows if r["split"] == split} == set(sources.CLASSES)
+    # ~70% train
+    assert 0.62 < n["train"] / len(rows) < 0.78
