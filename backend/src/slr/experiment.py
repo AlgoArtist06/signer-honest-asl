@@ -87,11 +87,16 @@ def wait_for_kaggle(get, poll: int = 30) -> None:
 # --- sampling ----------------------------------------------------------------
 
 def subsample(rows: list[dict], per_class: int, seed: int = 0) -> list[dict]:
-    """Cap images per class by dropping whole groups.
+    """Cap images per class, dealing whole sessions wherever one fits.
 
-    Frames are never sampled individually. A session is all-in or all-out, so a
-    subsample cannot split a session across the train/test boundary and cannot
-    flatter the result.
+    Sessions are dealt whole so a subsample can never split one across the
+    train/test boundary. On `asl_alphabet` a recovered session runs to thousands
+    of frames, so whole sessions alone cannot honour a cap of a few hundred -
+    taking one session already overshoots by an order of magnitude. Where that
+    happens a contiguous *prefix* of the session is kept instead. That is still
+    one session, still all-in or all-out of any split, and still an unbroken run
+    of near-identical frames, so protocol A's contamination is preserved rather
+    than thinned away by the sampling.
     """
     if not per_class:
         return rows
@@ -108,8 +113,9 @@ def subsample(rows: list[dict], per_class: int, seed: int = 0) -> list[dict]:
         for g in names:
             if n >= per_class:
                 break
-            kept += groups[g]
-            n += len(groups[g])
+            take = groups[g][: per_class - n]
+            kept += take
+            n += len(take)
     print(f"[sample] {len(rows)} -> {len(kept)} images "
           f"(<={per_class}/class, whole groups only)")
     return kept

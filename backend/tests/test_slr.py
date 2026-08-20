@@ -353,3 +353,28 @@ def test_signer_rule_holds_on_the_real_digits_corpus():
     assert dupes / len(by_signer) < 0.05, f"{dupes}/{len(by_signer)} signers have a repeated digit"
     complete = sum(1 for v in by_signer.values() if set(v) == set("0123456789"))
     assert complete > 0.7 * len(by_signer), f"only {complete}/{len(by_signer)} signers are complete"
+
+
+def test_subsample_honours_the_cap_even_when_one_session_exceeds_it():
+    """A recovered `asl_alphabet` session runs to thousands of frames, so a cap
+    of a few hundred is only meetable by keeping part of one session. The part
+    kept must stay contiguous, so it is still a single unbroken run that any
+    split deals to exactly one side."""
+    from slr import experiment
+
+    rows = [{"label": "A", "group": "g0", "path": f"a{i}.jpg"} for i in range(5000)]
+    rows += [{"label": "B", "group": "g1", "path": f"b{i}.jpg"} for i in range(120)]
+    rows += [{"label": "B", "group": "g2", "path": f"c{i}.jpg"} for i in range(120)]
+
+    kept = experiment.subsample(rows, per_class=200)
+    by_label = {}
+    for r in kept:
+        by_label.setdefault(r["label"], []).append(r)
+
+    assert len(by_label["A"]) == 200, "one oversized session must be cut to the cap"
+    assert [r["path"] for r in by_label["A"]] == [f"a{i}.jpg" for i in range(200)], \
+        "the kept frames must be a contiguous prefix, not a scatter"
+    # B's two sessions are small enough to deal whole: 120 fits, 120+120 exceeds
+    # 200, so the second is trimmed to 80 rather than dropped or taken entire.
+    assert len(by_label["B"]) == 200
+    assert len({r["group"] for r in by_label["B"]}) == 2
