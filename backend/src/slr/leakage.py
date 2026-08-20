@@ -90,14 +90,20 @@ def _bands(h: np.ndarray, n_bands: int) -> np.ndarray:
     return np.stack([(h >> np.uint64(i * width)) & mask for i in range(n_bands)], axis=1)
 
 
-def candidate_pairs(h: np.ndarray, max_dist: int) -> Iterable[tuple[int, int]]:
-    """Yield index pairs that could be within `max_dist` bits.
+def candidate_pair_blocks(h: np.ndarray, max_dist: int
+                          ) -> Iterable[tuple[np.ndarray, np.ndarray]]:
+    """Yield `(ia, ib)` index arrays of pairs that could be within `max_dist` bits.
 
     Pigeonhole: with B = max_dist + 1 bands, a pair differing in at most
     max_dist bits leaves at least one band untouched, so it collides there.
     No true match is missed. Buckets larger than `cap` are dropped - a bucket
     that big means a flat or near-black band shared by thousands of images,
     which carries no identity signal and would blow up quadratically.
+
+    Emitted a bucket at a time rather than a pair at a time because the caller
+    has to Hamming-check every candidate: on a 90k-image corpus that is tens of
+    millions of checks, and one numpy call per pair is all call overhead. A
+    whole bucket verifies in a single vectorised pass instead.
     """
     n_bands = max(2, max_dist + 1)
     cap = 4000
@@ -109,9 +115,14 @@ def candidate_pairs(h: np.ndarray, max_dist: int) -> Iterable[tuple[int, int]]:
             if e - s < 2 or e - s > cap:
                 continue
             idx = order[s:e]
-            for i in range(len(idx)):
-                for j in range(i + 1, len(idx)):
-                    yield int(idx[i]), int(idx[j])
+            ia, ib = np.triu_indices(len(idx), k=1)
+            yield idx[ia], idx[ib]
+
+
+def candidate_pairs(h: np.ndarray, max_dist: int) -> Iterable[tuple[int, int]]:
+    """Pair-at-a-time view of `candidate_pair_blocks`, for readability in tests."""
+    for ia, ib in candidate_pair_blocks(h, max_dist):
+        yield from zip(ia.tolist(), ib.tolist())
 
 
 # --- union-find --------------------------------------------------------------
@@ -185,10 +196,11 @@ def recover_groups(rows: list[dict], max_dist: int = 6, workers: int = 0) -> lis
 
         dsu = _DSU(len(idxs))
         n_edges = 0
-        for a, b in candidate_pairs(h, max_dist):
-            if hamming(h[a : a + 1], h[b : b + 1])[0] <= max_dist:
+        for ia, ib in candidate_pair_blocks(h, max_dist):
+            keep = hamming(h[ia], h[ib]) <= max_dist
+            n_edges += int(keep.sum())
+            for a, b in zip(ia[keep].tolist(), ib[keep].tolist()):
                 dsu.union(a, b)
-                n_edges += 1
 
         comps: dict[int, int] = {}
         for local, gi in enumerate(idxs):
