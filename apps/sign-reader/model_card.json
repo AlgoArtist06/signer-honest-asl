@@ -1,6 +1,5 @@
 {
   "generated_from": "runs/fusion/holdout_report.json",
-  "regenerate_with": "python scripts/holdout_report.py, then update the figures below. apps/sign-reader/tests/test_app.py::test_card_figures_agree_with_the_generated_holdout_report fails if they drift apart.",
   "headline_claim": "Cross-corpus isolated-handshape accuracy. NOT signer-independent: neither corpus records who signed, so what is established is corpus disjointness, not signer disjointness.",
   "model": {
     "name": "DeiT III base + hand-landmark geometry",
@@ -193,7 +192,7 @@
   "attribution": "Protocol C measures the served 5% pixel / 95% landmark-geometry strategy on all 1,740 holdout images: 0.9118 macro-F1 against 0.674 for pixels alone. Almost all of that is the landmark representation; the pixel fusion on top is statistically unresolved on accuracy and earns its place on calibration. Personal photos were never trained on and were not used to choose the ratio. The geometry training setup was picked in an experiment that printed both the holdout and the personal-photo scores beside every candidate, so neither is an untouched check of it.",
   "limits": [
     "The photo path reads fingerspelling only: single static hand shapes, one letter at a time.",
-    "J and Z are a letter plus a motion, so neither is answerable from one frame - the photo corpus labels a frozen mid-trace pose 'Z' and the still model can only ever answer that pose. \"Record a moving sign\" reads a clip with a separate recurrent model that does answer J, Z and five whole-word signs, but its accuracy is not quotable: it was measured clip-disjoint over 296 clips from three signers in one room. Facial grammar is read by neither path.",
+    "J and Z are a letter plus a motion, so neither is answerable from one frame. The app does not read them: they are left out of the vocabulary, and an older bundle that still knows them never answers them. Facial grammar is not read either.",
     "Not signer-independent. No corpus here records participant ids, so no held-out-signer claim is supported by any number on this card.",
     "One test corpus is not a population. The 0.9184 describes the training corpora -> asl_alphabet_test and nothing wider. asl_dynamic, which used to be the untouched third-corpus check, is now in the geometry training pool, so no untouched third corpus remains.",
     "The holdout has been looked at repeatedly - to compare feature sets, choose a detector, inspect class errors and accept a served model - so it is a diagnostic, not a sealed test.",

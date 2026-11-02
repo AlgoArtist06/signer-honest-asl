@@ -298,28 +298,6 @@ button:focus-visible, [tabindex]:focus-visible {
 .shutter:disabled { opacity: .55; cursor: progress; box-shadow: none; }
 .upload { min-height: 62px; border-radius: 20px; padding: 0 20px; }
 
-/* Secondary to the calibrated photo path, so outlined. It takes a whole row
-   because its label does not fit in a third of the width. */
-.record {
-  flex: 1 1 100%; display: inline-flex; align-items: center; justify-content: center;
-  gap: 10px; min-height: 52px; border-radius: 20px;
-  border: 1.5px solid var(--clay-br); background: var(--clay-bg);
-  color: var(--clay-d); font-size: 15px; font-weight: 600;
-}
-.record svg { width: 19px; height: 19px; }
-.record:hover { border-color: var(--clay); }
-.record:disabled { opacity: .55; cursor: progress; }
-.record.recording {
-  background: var(--clay); border-color: var(--clay); color: #fff;
-  animation: rec-pulse 1s ease-in-out infinite;
-}
-@keyframes rec-pulse {
-  50% { box-shadow: 0 0 0 6px rgba(180, 96, 63, .18); }
-}
-@media (prefers-reduced-motion: reduce) {
-  .record.recording { animation: none; }
-}
-
 /* --- about ----------------------------------------------------------------- */
 
 .about {

@@ -13,15 +13,13 @@ from PIL import Image
 from . import hands, sources
 
 WRIST = 0
-FINGERS = {"thumb": (1, 2, 3, 4), "index": (5, 6, 7, 8), "middle": (9, 10, 11, 12),
-           "ring": (13, 14, 15, 16), "pinky": (17, 18, 19, 20)}
 MIDDLE_MCP = 9
 
 CACHE = sources.DEFAULT_ROOT.parent / "landmarks"
 
 V1 = "normalised_landmarks_v1"
 V2 = "landmark_distances_v2"
-TRAIN_SOURCES = ("asl_alphabet", "signalphaset", "asl_dynamic")
+TRAIN_SOURCES = ("asl_alphabet", "signalphaset")
 
 
 def canonical_side(lm: np.ndarray, side=None) -> np.ndarray:
@@ -34,28 +32,15 @@ def canonical_side(lm: np.ndarray, side=None) -> np.ndarray:
     return np.asarray(side) == "Left"
 
 
-def normalise(lm: np.ndarray, side=None, rotate: bool = False) -> np.ndarray:
-    """(N, 21, 3) pixel landmarks -> wrist at the origin, palm length 1, right-handed.
-
-    `rotate` also spins the palm to point up.
-    """
+def normalise(lm: np.ndarray, side=None) -> np.ndarray:
+    """(N, 21, 3) pixel landmarks -> wrist at the origin, palm length 1, right-handed."""
     left = canonical_side(lm, side)
     if lm.ndim == 2:
         lm = lm[None]
     p = np.asarray(lm) - np.asarray(lm)[:, WRIST:WRIST + 1]
     p[left, :, 0] *= -1
     palm = np.linalg.norm(p[:, MIDDLE_MCP], axis=-1)[:, None, None]
-    p = p / (palm + 1e-8)
-    if not rotate:
-        return p
-    a = p[:, MIDDLE_MCP, :2]
-    c, sn = a[:, 1:2], a[:, 0:1]
-    n = np.sqrt(c ** 2 + sn ** 2) + 1e-8
-    c, sn = (c / n)[:, None, 0], (sn / n)[:, None, 0]
-    x, y = p[..., 0].copy(), p[..., 1].copy()
-    p[..., 0] = c * x - sn * y
-    p[..., 1] = sn * x + c * y
-    return p
+    return p / (palm + 1e-8)
 
 
 def _coords(p: np.ndarray) -> np.ndarray:
@@ -81,56 +66,11 @@ FEATURES = {
     V1: Feature(_coords, 3 * 21),
     V2: Feature(_coords_and_distances, 3 * 21 + len(_UPPER[0])),
 }
-FEATURE_DIM = FEATURES[V1].dim
 
 
-def features(lm: np.ndarray, side=None, feature: str = V1,
-             rotate: bool = False) -> np.ndarray:
+def features(lm: np.ndarray, side=None, feature: str = V1) -> np.ndarray:
     """The vector a classifier sees, for the named feature tag. (N, dim)."""
-    return FEATURES[feature].fn(normalise(lm, side, rotate))
-
-
-def finger_features(lm: np.ndarray, side=None) -> np.ndarray:
-    """Per-finger geometry, for a person to read rather than for training.
-
-    Per finger: three joint angles, an extension ratio (tip-to-knuckle distance
-    over summed bone length, so 1.0 is straight and ~0.3 is a fist), and the
-    tip's distance to the wrist and to the palm centre. Then the four gaps
-    between adjacent fingertips, and the thumb-to-index pinch. 35 numbers.
-    """
-    p = normalise(lm, side)
-    palm = p[:, [WRIST, 5, 9, 13, 17]].mean(1)
-    out = []
-    for idx in FINGERS.values():
-        chain = (WRIST,) + idx
-        for j in range(1, len(chain) - 1):
-            v1 = _unit(p[:, chain[j - 1]] - p[:, chain[j]])
-            v2 = _unit(p[:, chain[j + 1]] - p[:, chain[j]])
-            out.append(np.arccos(np.clip((v1 * v2).sum(-1), -1.0, 1.0)))
-        tip, mcp = p[:, idx[-1]], p[:, idx[0]]
-        bone = sum(np.linalg.norm(p[:, chain[k + 1]] - p[:, chain[k]], axis=-1)
-                   for k in range(len(chain) - 1))
-        out.append(np.linalg.norm(tip - mcp, axis=-1) / (bone + 1e-8))
-        out.append(np.linalg.norm(tip - p[:, WRIST], axis=-1))
-        out.append(np.linalg.norm(tip - palm, axis=-1))
-    tips = [p[:, f[-1]] for f in FINGERS.values()]
-    for a, b in zip(tips, tips[1:]):
-        out.append(np.linalg.norm(a - b, axis=-1))
-    out.append(np.linalg.norm(tips[0] - tips[1], axis=-1))
-    return np.stack(out, -1)
-
-
-def _unit(v: np.ndarray) -> np.ndarray:
-    return v / (np.linalg.norm(v, axis=-1, keepdims=True) + 1e-8)
-
-
-def describe(lm: np.ndarray) -> dict:
-    """One hand's `finger_features` as a readable dict."""
-    f = finger_features(lm.reshape(1, 21, 3))[0]
-    names = list(FINGERS)
-    return {n: {"extension": round(float(f[i * 6 + 3]), 3),
-                "curl_radians": [round(float(f[i * 6 + j]), 3) for j in range(3)]}
-            for i, n in enumerate(names)}
+    return FEATURES[feature].fn(normalise(lm, side))
 
 
 def extract(path: str | Path) -> tuple[np.ndarray, str] | None:
@@ -191,7 +131,7 @@ def load_cache(*paths: Path) -> dict:
     return out
 
 
-def build(n_classes: int, in_dim: int = FEATURE_DIM, hidden: int = 256,
+def build(n_classes: int, in_dim: int, hidden: int = 256,
           dropout: float = 0.3) -> nn.Module:
     return nn.Sequential(
         nn.Linear(in_dim, hidden), nn.BatchNorm1d(hidden), nn.GELU(), nn.Dropout(dropout),
@@ -285,13 +225,6 @@ def model_from_blob(blob: dict, landmark_weight: float | None = None) -> Model:
     return Model(net, mean, std, list(blob["classes"]), w, tag)
 
 
-def load_model(path: Path) -> Model:
-    """Read a bundle written by `run` back into something servable."""
-    from . import safe_load
-
-    return model_from_blob(safe_load(path))
-
-
 @torch.no_grad()
 def class_probs(model: Model, lm: np.ndarray, side=None) -> np.ndarray:
     """(N, len(model.classes)) softmax for detected hands, built with the model's own feature."""
@@ -330,21 +263,6 @@ def fuse(pixel: np.ndarray, landmark: np.ndarray,
          landmark_weight: float) -> np.ndarray:
     """Weighted average of pixel and landmark probabilities."""
     return (1.0 - landmark_weight) * pixel + landmark_weight * landmark
-
-
-@torch.no_grad()
-def predict_one(model: Model, arr: np.ndarray, k: int = 3) -> dict:
-    """One photo (H, W, 3) -> label, confidence, top-k. Confidence is uncalibrated."""
-    p, found, side = probs(model, arr, model.classes)
-    if not found:
-        return {"label": "nothing", "confidence": None, "hand_detected": False,
-                "top_k": [{"label": "nothing", "p": None}]}
-    order = np.argsort(-p)[:k]
-    return {"label": model.classes[int(order[0])],
-            "confidence": round(float(p[order[0]]), 4),
-            "hand_detected": True, "hand": side,
-            "top_k": [{"label": model.classes[int(i)], "p": round(float(p[i]), 4)}
-                      for i in order]}
 
 
 def detector_decomposition(pred: np.ndarray, truth: np.ndarray,

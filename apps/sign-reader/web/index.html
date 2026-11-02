@@ -23,7 +23,7 @@
     <span class="wordmark">Sign Reader</span>
   </div>
   <div class="bar-right">
-    <span class="bar-note">Reads fingerspelling · a photo or a movement</span>
+    <span class="bar-note">Reads fingerspelling, one photo at a time</span>
     <button type="button" class="link" id="open-about" aria-haspopup="dialog">How it works</button>
   </div>
 </header>
@@ -153,14 +153,6 @@
       </button>
       <button type="button" class="btn-quiet upload" id="upload-btn">Upload instead</button>
       <input type="file" id="file" accept="image/*" hidden>
-      <!-- After the two photo buttons, so it wraps onto its own row rather than
-           pushing "Upload instead" down onto a third one of its own. -->
-      <button type="button" class="record" id="record" hidden>
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4" fill="currentColor" stroke="none"/>
-        </svg>
-        <span id="record-text">Record a moving sign</span>
-      </button>
     </div>
   </section>
 </main>

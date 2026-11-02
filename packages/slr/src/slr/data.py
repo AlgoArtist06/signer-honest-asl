@@ -107,52 +107,6 @@ def split_by_group(rows: list[dict], val: float = 0.15, test: float = 0.15,
     return rows
 
 
-def split_random_stratified(rows: list[dict], val: float = 0.15, test: float = 0.15,
-                            seed: int = 0) -> list[dict]:
-    """Per-class 70/15/15 that ignores groups, so near-copies can end up on both sides."""
-    rng = random.Random(seed)
-    by_label: dict[str, list[dict]] = defaultdict(list)
-    for r in rows:
-        by_label[r["label"]].append(r)
-    for items in by_label.values():
-        rng.shuffle(items)
-        n = len(items)
-        n_test = int(round(n * test))
-        n_val = int(round(n * val))
-        n_train = n - n_val - n_test
-        if n_train < 1 and n:
-            if n_val:
-                n_val -= 1
-            else:
-                n_test -= 1
-            n_train += 1
-        for i, r in enumerate(items):
-            r["split"] = ("train" if i < n_train
-                          else "val" if i < n_train + n_val
-                          else "test")
-    _report(rows, allow_straddle=True)
-    return rows
-
-
-def carve_tuning_split(rows: list[dict], frac: float = 0.5, max_dist: int = 6,
-                       seed: int = 0, workers: int = 6) -> tuple[list[dict], list[dict]]:
-    """Split a holdout corpus into a tuning half and a reporting half, by group."""
-    from . import leakage
-
-    work = [dict(r) for r in rows]
-    leakage.recover_groups(work, max_dist=max_dist, workers=workers)
-    for r in work:
-        r["split"] = ""
-    split_by_group(work, val=frac, test=0.0, seed=seed)
-
-    by_path = {r["path"]: r["split"] for r in work}
-    tune = [r for r in rows if by_path[r["path"]] == "val"]
-    report = [r for r in rows if by_path[r["path"]] == "train"]
-    print(f"[tuning] {len(tune)} to tune on, {len(report)} held for reporting, "
-          f"group-disjoint")
-    return tune, report
-
-
 def split_cross_source(rows: list[dict], train_sources: list[str],
                        test_sources: list[str], val: float = 0.15,
                        seed: int = 0) -> list[dict]:
@@ -230,7 +184,7 @@ class SignDataset(Dataset):
         bad = [r for r in rows if r["label_idx"] < 0]
         if bad:
             raise ValueError(
-                f"{len(bad)} rows have label_idx=-1 (not one of the 29 classes), "
+                f"{len(bad)} rows have label_idx=-1 (not in the class vocabulary), "
                 f"from {sorted({r['source'] for r in bad})}. Drop them before training."
             )
         self.rows = rows

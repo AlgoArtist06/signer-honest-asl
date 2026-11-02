@@ -20,16 +20,12 @@ const els = {
   collect: $('collect'), collectCount: $('collect-count'),
   collectNote: $('collect-note'), truth: $('truth'), saveLabel: $('save-label'),
   shutter: $('shutter'), shutterText: $('shutter-text'),
-  record: $('record'), recordText: $('record-text'),
   uploadBtn: $('upload-btn'), file: $('file'),
   bootError: $('boot-error'), about: $('about'), aboutBody: $('about-body'),
 };
 
-// `message` is a list of what was read, so a word sign like HELLO stays one
-// item instead of reading as fingerspelled H-E-L-L-O.
 const state = { message: [], stream: null, last: null, busy: false, hasCamera: false,
-                shownUrl: null, collecting: false, captureId: null, session: '',
-                motion: null };
+                shownUrl: null, collecting: false, captureId: null, session: '' };
 
 const QUESTION_SVG = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"
   stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a9 9 0 1 1 0 18 9 9 0 0 1 0-18z"/>
@@ -37,13 +33,13 @@ const QUESTION_SVG = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
 
 /* --- the message ---------------------------------------------------------- */
 
-// `space`, `del` and `nothing` are classes in the 29-way vocabulary.
+// `space`, `del` and `nothing` are classes alongside the letters.
 function applyLabel(label) {
   if (label === 'nothing') return null;
   if (label === 'space') { state.message.push(' '); return 'space'; }
   if (label === 'del') { state.message.pop(); return 'delete'; }
   state.message.push(label);
-  return label.length > 1 ? 'word' : 'letter';
+  return 'letter';
 }
 
 // How a label reads on screen, without appending it to the message.
@@ -51,14 +47,11 @@ function glyphFor(label) {
   if (label === 'nothing') return { text: 'no sign', word: true };
   if (label === 'space') return { text: 'space', word: true };
   if (label === 'del') return { text: 'delete', word: true };
-  return { text: label, word: label.length > 1 };
+  return { text: label, word: false };
 }
 
-// Word signs get spaces around them so they never run into adjacent letters.
-const padWord = (t) => (t.length > 1 ? ` ${t} ` : t);
-
 function messageText() {
-  return state.message.map(padWord).join('').replace(/ {2,}/g, ' ');
+  return state.message.join('').replace(/ {2,}/g, ' ');
 }
 
 function renderMessage() {
@@ -68,8 +61,8 @@ function renderMessage() {
   }
   const span = document.createElement('span');
   span.className = 'message-text';
-  // Letters are spaced apart, as fingerspelling reads; word signs stay whole.
-  span.textContent = state.message.map(padWord).join(' ').replace(/ {2,}/g, ' ');
+  // Letters are spaced apart, as fingerspelling reads.
+  span.textContent = state.message.join(' ').replace(/ {2,}/g, ' ');
   els.message.replaceChildren(span);
 }
 
@@ -157,70 +150,6 @@ function goLive() {
   els.overlay.hidden = false;
 }
 
-/* --- reading a moving sign ------------------------------------------------
-
-   J and Z need movement, so this records the landmarks the tracking loop
-   already gets back from /api/landmarks and posts them to the clip model.    */
-
-const SAMPLE_MS = 1000 / 12;   // the clip model was trained at 12 fps
-const RECORD_MS = 3000;        // training clips are ~3.5s; 2s was noticeably worse
-
-const rec = { on: false, frames: [], sides: [], last: 0, enabled: false };
-
-function bufferFrame(d) {
-  if (!rec.on || !d.xyz) return;
-  const now = performance.now();
-  // Keep to the sample rate the model was fitted at.
-  if (now - rec.last < SAMPLE_MS) return;
-  rec.last = now;
-  rec.frames.push(d.xyz);
-  rec.sides.push(d.side || 'Right');
-}
-
-async function recordSign() {
-  if (state.busy || rec.on || !rec.enabled) return;
-  if (!state.hasCamera) {
-    return showError('Recording a movement needs the live camera. '
-      + 'A still photo can be uploaded, but a clip cannot be reconstructed from one.');
-  }
-  state.busy = true;
-  rec.on = true;
-  rec.frames = [];
-  rec.sides = [];
-  rec.last = 0;
-  els.record.classList.add('recording');
-  els.shutter.disabled = true;
-  els.shot.hidden = true;                 // watch your own hand while signing
-  els.overlay.hidden = false;
-
-  const t0 = performance.now();
-  while (performance.now() - t0 < RECORD_MS) {
-    const left = Math.ceil((RECORD_MS - (performance.now() - t0)) / 1000);
-    els.recordText.textContent = `Signing... ${left}`;
-    await new Promise((res) => setTimeout(res, 100));
-  }
-  rec.on = false;
-  els.record.classList.remove('recording');
-  els.recordText.textContent = 'Reading...';
-
-  try {
-    const r = await fetch('/api/motion?top_k=3', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ frames: rec.frames, sides: rec.sides }),
-    });
-    const d = await r.json();
-    if (!r.ok) throw new Error(d.detail || `${r.status}`);
-    render(d);
-  } catch (e) {
-    showError(e.message);
-  } finally {
-    state.busy = false;
-    els.shutter.disabled = false;
-    els.recordText.textContent = 'Record a moving sign';
-  }
-}
-
 function showPhoto(url) {
   els.shot.src = url;
   els.shot.hidden = false;
@@ -237,12 +166,8 @@ function render(d) {
   els.result.hidden = false;
 
   const pct = Math.round(d.confidence * 100);
-  // The clip model is uncalibrated, so its score must not read as a probability.
-  els.confText.textContent = d.calibrated === false
-    ? `${pct}% raw score (uncalibrated)` : `${pct}% sure`;
-  els.ms.textContent = d.frames
-    ? `${d.frames} frames · ${Math.round(d.latency_ms)} ms`
-    : `${Math.round(d.latency_ms)} ms`;
+  els.confText.textContent = `${pct}% sure`;
+  els.ms.textContent = `${Math.round(d.latency_ms)} ms`;
   els.meter.style.width = `${pct}%`;
 
   if (d.abstain) {
@@ -267,19 +192,16 @@ function render(d) {
     els.glyph.className = `glyph${g.word ? ' word' : ''}`;
     els.glyph.textContent = g.text;
     els.phrase.className = 'result-phrase';
-    els.phrase.textContent = d.calibrated === false
-      ? 'Read from the movement' : phraseFor(d.confidence);
+    els.phrase.textContent = phraseFor(d.confidence);
     els.sub.textContent = {
       letter: 'Added to your message',
-      word: 'A whole-word sign, added to your message',
       space: 'Added a space',
       delete: 'Removed the last letter',
     }[kind] || 'No hand sign in this photo, so nothing was added';
     els.meter.className = 'meter-fill';
   }
 
-  // A recorded clip banks nothing, so it leaves the collection card alone.
-  if (state.collecting && d.model !== 'clip_gru') {
+  if (state.collecting) {
     state.captureId = d.capture_id || null;
     els.saveLabel.disabled = !state.captureId;
     if (state.captureId) idleNote();
@@ -409,7 +331,6 @@ els.shutter.addEventListener('click', async () => {
   send(blob, url);
 });
 
-els.record.addEventListener('click', recordSign);
 els.useAnyway.addEventListener('click', useAnyway);
 els.saveLabel.addEventListener('click', saveLabel);
 els.truth.addEventListener('keydown', (e) => {
@@ -457,17 +378,6 @@ async function boot() {
       els.shutter.disabled = true;
       els.uploadBtn.disabled = true;
     }
-    // Shown only with a clip checkpoint loaded. Not gated on the camera: the
-    // permission prompt may still be open, so `recordSign` checks it instead.
-    if (h.motion?.ok) {
-      rec.enabled = true;
-      els.record.hidden = false;
-      els.record.title =
-        `Records ${RECORD_MS / 1000}s and reads the movement, for J and Z. `
-        + `Also knows `
-        + `${(h.motion.classes || []).filter((c) => c.length > 1).join(', ')}.`;
-      state.motion = h.motion;
-    }
   } catch { /* health is a nicety; the predict call reports its own failures */ }
 
   try {
@@ -480,28 +390,6 @@ async function boot() {
 }
 
 const esc = (s) => String(s ?? '').replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
-
-function motionBlock() {
-  const mo = state.motion;
-  if (!mo?.ok) return '';
-  const words = (mo.classes || []).filter((c) => c.length > 1);
-  const baseline = mo.frame_classifier_plurality;
-  return `
-    <div class="about-block">
-      <p class="about-h">Reading a movement, not a pose</p>
-      <p class="about-claim">J and Z are motion letters, and a photo cannot hold one.</p>
-      <p class="proto-x">J is I with a hook and Z is D with a zigzag. The photo corpus
-        labels a frozen mid-trace frame "Z", so the still model can only ever answer
-        that pose. "Record a moving sign" watches ${RECORD_MS / 1000} seconds of hand
-        movement instead and asks a separate recurrent model, which also knows
-        ${words.length} whole-word signs: ${esc(words.join(', '))}.</p>
-      ${baseline != null ? `<p class="proto-x">For comparison, the photo model voting
-        frame by frame on the same clips gets ${Math.round(baseline * 100)}%.</p>` : ''}
-      <p class="note warn">${esc(mo.caveat)}</p>
-      <p class="note">Its confidence is a raw score, not a calibrated probability.
-        Unlike the photo model, it has no refusal threshold.</p>
-    </div>`;
-}
 
 function renderAbout(m) {
   const model = m.model || {};
@@ -540,8 +428,9 @@ function renderAbout(m) {
 
   els.aboutBody.innerHTML = `
     <p class="about-lede">This app reads fingerspelling, one letter at a time.</p>
-    <p class="about-sub">Photograph a hand shape and it guesses which of ${model.n_classes || 29} signs
-      you made: the letters A to Z, plus space, delete, and nothing.</p>
+    <p class="about-sub">Photograph a hand shape and it guesses which of ${(m.classes || []).length} signs
+      you made: the letters A to Z except J and Z, plus space, delete, and nothing.
+      J and Z are drawn in the air, so a photo cannot hold them.</p>
 
     <div class="about-block">
       <p class="about-h">How often is it right?</p>
@@ -568,8 +457,6 @@ function renderAbout(m) {
       ${arch.valid_evidence === false
         ? `<p class="note warn">${esc(arch.explain)}</p>` : ''}
     </div>
-
-    ${motionBlock()}
 
     <div class="about-block">
       <p class="about-h">The ${(m.classes || []).length} signs it knows</p>
@@ -733,7 +620,6 @@ async function trackOnce() {
   }
   if (!r.ok) return;
   const d = await r.json();
-  bufferFrame(d);
   trackChip(!!d.hand);
   renderFocus(d.sharpness);
   drawSkeleton(els.shot.hidden ? d.hand : null);

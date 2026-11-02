@@ -9,8 +9,6 @@ import torch.nn as nn
 @dataclass(frozen=True)
 class Preset:
     timm_name: str
-    family: str
-    tier: str
     img_size: int = 224
     batch_size: int = 64
     lr: float = 3e-4
@@ -18,62 +16,10 @@ class Preset:
     approx_params_m: float = 0.0
 
 
-def _p(timm_name, family, tier, **kw) -> Preset:
-    return Preset(timm_name=timm_name, family=family, tier=tier, **kw)
-
-
+# ponytail: only the served backbone. The architecture search that picked it is in git history.
 PRESETS: dict[str, Preset] = {
-    "vit_tiny": _p("vit_tiny_patch16_224.augreg_in21k_ft_in1k", "vit", "scale",
-                   batch_size=128, lr=5e-4, approx_params_m=5.5),
-    "vit_small": _p("vit_small_patch16_224.augreg_in21k_ft_in1k", "vit", "scale",
-                    batch_size=96, lr=3e-4, approx_params_m=21.7),
-    "vit_base": _p("vit_base_patch16_224.augreg2_in21k_ft_in1k", "vit", "scale",
-                   batch_size=48, lr=1e-4, layer_decay=0.75, approx_params_m=85.8),
-    "vit_large": _p("vit_large_patch16_224.augreg_in21k_ft_in1k", "vit", "scale",
-                    batch_size=16, lr=5e-5, layer_decay=0.70, approx_params_m=303.3),
-
-    # Same architecture as vit_base with a better training recipe.
-    "deit3_base": _p("deit3_base_patch16_224.fb_in22k_ft_in1k", "vit", "arch",
-                     batch_size=48, lr=1e-4, layer_decay=0.75, approx_params_m=85.8),
-    "swin_base": _p("swin_base_patch4_window7_224.ms_in22k_ft_in1k", "hybrid", "arch",
-                    batch_size=48, lr=1e-4, approx_params_m=86.8),
-    # CNN baselines to compare the transformers against.
-    "convnext_base": _p("convnext_base.fb_in22k_ft_in1k", "cnn", "arch",
-                        batch_size=48, lr=1e-4, approx_params_m=87.6),
-    "convnextv2_base": _p("convnextv2_base.fcmae_ft_in22k_in1k", "cnn", "arch",
-                          batch_size=48, lr=1e-4, approx_params_m=87.7),
-    "beitv2_base": _p("beitv2_base_patch16_224.in1k_ft_in22k_in1k", "vit", "arch",
-                      batch_size=48, lr=1e-4, layer_decay=0.75, approx_params_m=85.8),
-    "caformer_b36": _p("caformer_b36.sail_in22k_ft_in1k", "hybrid", "arch",
-                       batch_size=32, lr=1e-4, approx_params_m=95.8),
-    # 448px, about 4x the compute of the others.
-    "eva02_base": _p("eva02_base_patch14_448.mim_in22k_ft_in22k_in1k", "vit", "arch",
-                     img_size=448, batch_size=8, lr=5e-5, layer_decay=0.75,
-                     approx_params_m=86.4),
-    "siglip_base": _p("vit_base_patch16_siglip_224.webli", "vit", "arch",
-                      batch_size=48, lr=1e-4, layer_decay=0.75, approx_params_m=92.9),
-    "clip_base": _p("vit_base_patch16_clip_224.laion2b_ft_in12k_in1k", "vit", "arch",
-                    batch_size=48, lr=1e-4, layer_decay=0.75, approx_params_m=85.8),
-    "dinov2_small": _p("vit_small_patch14_dinov2.lvd142m", "vit", "arch",
-                       img_size=518, batch_size=16, lr=1e-4, approx_params_m=22.1),
-    "dinov2_base": _p("vit_base_patch14_reg4_dinov2.lvd142m", "vit", "arch",
-                      img_size=518, batch_size=8, lr=5e-5, layer_decay=0.75,
-                      approx_params_m=86.6),
-
-    "efficientformer_s2": _p("efficientformerv2_s2.snap_dist_in1k", "hybrid", "mobile",
-                             batch_size=128, lr=5e-4, approx_params_m=12.1),
-    "mobilevit_v2": _p("mobilevitv2_150.cvnets_in22k_ft_in1k", "hybrid", "mobile",
-                       img_size=256, batch_size=96, lr=5e-4, approx_params_m=9.8),
-    "effnetv2_s": _p("tf_efficientnetv2_s.in21k_ft_in1k", "cnn", "mobile",
-                     batch_size=64, lr=5e-4, approx_params_m=20.2),
-}
-
-SWEEPS: dict[str, list[str]] = {
-    "scale": [k for k, v in PRESETS.items() if v.tier == "scale"],
-    "arch": [k for k, v in PRESETS.items() if v.tier == "arch"],
-    "mobile": [k for k, v in PRESETS.items() if v.tier == "mobile"],
-    "quick": ["vit_small", "convnext_base", "siglip_base", "dinov2_small"],
-    "all": list(PRESETS),
+    "deit3_base": Preset("deit3_base_patch16_224.fb_in22k_ft_in1k", batch_size=48, lr=1e-4,
+                         layer_decay=0.75, approx_params_m=85.8),
 }
 
 

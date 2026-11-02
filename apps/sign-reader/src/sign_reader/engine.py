@@ -18,6 +18,7 @@ import torch
 from PIL import Image, UnidentifiedImageError
 
 from slr import data as slr_data, landmarks as LM, model as M, safe_load
+from slr.sources import CLASSES
 
 from . import APP
 
@@ -109,8 +110,11 @@ def load() -> dict:
             print("[engine] WARNING: fused bundle has no fused calibration; "
                   "falling back to the pixel model's threshold")
 
+    # An older bundle may know J and Z; answer only from the current vocabulary.
+    keep = [i for i, c in enumerate(blob["classes"]) if c in CLASSES]
     _STATE.update(
-        net=net, dev=dev, classes=blob["classes"], temp=temp, threshold=thresh,
+        net=net, dev=dev, bundle_classes=blob["classes"], keep=torch.tensor(keep),
+        classes=[blob["classes"][i] for i in keep], temp=temp, threshold=thresh,
         preset=blob["preset"], img_size=blob["img_size"],
         tf=slr_data.build_transforms(blob["img_size"], train=False),
         coverage=coverage, metrics=blob.get("metrics", {}),
@@ -205,7 +209,7 @@ def predict(raw: bytes, top_k: int = 3, explain: bool = False) -> dict:
     served_model = "pixel"
     if _STATE["geometry"] is not None:
         geometry_probs, _found, _side = LM.probs(
-            _STATE["geometry"], np.asarray(img), _STATE["classes"])
+            _STATE["geometry"], np.asarray(img), _STATE["bundle_classes"])
         fused_probs = LM.fuse(pixel_probs.detach().cpu().numpy(), geometry_probs,
                               _STATE["geometry"].landmark_weight)
         probs = torch.from_numpy(fused_probs).float()
@@ -216,6 +220,8 @@ def predict(raw: bytes, top_k: int = 3, explain: bool = False) -> dict:
             probs = (logp / float(cal["temperature"])).softmax(0)
         served_model = "fused"
 
+    probs = probs.cpu()[_STATE["keep"]]
+    probs = probs / probs.sum()
     k = min(top_k, probs.numel())
     vals, idx = probs.topk(k)
     conf = float(vals[0])
@@ -226,7 +232,8 @@ def predict(raw: bytes, top_k: int = 3, explain: bool = False) -> dict:
         try:
             # Gradient-weighted, so the map explains this letter, not any class.
             heat = _heatmap_png_b64(
-                M.grad_attention(_STATE["net"], x, int(idx[0])), _STATE["img_size"])
+                M.grad_attention(_STATE["net"], x, int(_STATE["keep"][idx[0]])),
+                _STATE["img_size"])
             crop = _input_png_b64(x)
         except TypeError:
             # Non-ViT backbones have no attention to roll up; answer without it.
@@ -235,9 +242,7 @@ def predict(raw: bytes, top_k: int = 3, explain: bool = False) -> dict:
     return {
         "label": label,
         "confidence": round(conf, 4),
-        "abstain": conf < _STATE["threshold"] or label in {"J", "Z"},
-        "reason": (f"{label} needs movement. Use Record a moving sign."
-                   if label in {"J", "Z"} else None),
+        "abstain": conf < _STATE["threshold"],
         "threshold": round(_STATE["threshold"], 4),
         "top_k": [{"label": _STATE["classes"][int(i)], "p": round(float(v), 4)}
                   for v, i in zip(vals, idx)],

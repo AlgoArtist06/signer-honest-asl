@@ -122,8 +122,7 @@ def main(argv: list[str] | None = None) -> int:
 
     rows = sources.read_manifest(a.manifest)
     tag = f"deploy_{PRESET}"
-    T.train_one(rows, PRESET, epochs=a.epochs, out_dir=a.runs, workers=a.workers,
-                tag=tag, eval_test=True)
+    T.train_one(rows, PRESET, epochs=a.epochs, out_dir=a.runs, workers=a.workers, tag=tag)
 
     run = a.runs / tag
     report = evaluate.run(run / "best.pt", a.manifest, run / "eval.json", a.workers)

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import json
 from collections import Counter, defaultdict
 from collections.abc import Iterable, Sequence
@@ -12,38 +11,6 @@ from PIL import Image
 
 HASH_BITS = 64
 _POPCOUNT8 = np.array([bin(i).count("1") for i in range(256)], dtype=np.uint8)
-
-
-def unique_image_indices(paths: Sequence[str | Path], labels: Sequence
-                         ) -> tuple[np.ndarray, dict]:
-    """Indices of the first copy of each pixel-identical image.
-
-    Raises if two identical images have different labels. Similar or resized
-    images are not merged.
-    """
-    if len(paths) != len(labels):
-        raise ValueError("need one label per image path")
-    seen, keep = {}, []
-    roster = hashlib.sha256()
-    for i, (path, label) in enumerate(zip(paths, labels)):
-        with Image.open(path) as image:
-            rgb = image.convert("RGB")
-            size = b"".join(n.to_bytes(8, "big") for n in rgb.size)
-            digest = hashlib.sha256(size + rgb.tobytes()).digest()
-        roster.update(digest + str(label).encode() + b"\0")
-        if digest in seen:
-            first, first_label = seen[digest]
-            if first_label != label:
-                raise ValueError(f"identical images have conflicting labels: "
-                                 f"{paths[first]} ({first_label}) and {path} ({label})")
-        else:
-            seen[digest] = (i, label)
-            keep.append(i)
-    return np.array(keep, dtype=np.int64), {
-        "method": "SHA256 of RGB dimensions and exact pixels",
-        "input_rows": len(paths), "unique_images": len(keep),
-        "duplicates_removed": len(paths) - len(keep), "roster_sha256": roster.hexdigest(),
-    }
 
 
 def dhash(path: str | Path, size: int = 8) -> int:
@@ -110,12 +77,6 @@ def candidate_pair_blocks(h: np.ndarray, max_dist: int, cap: int = 4000,
         stats["dropped_rows"] = dropped_rows
         stats["cap"] = cap
         stats["exact"] = dropped_buckets == 0
-
-
-def candidate_pairs(h: np.ndarray, max_dist: int) -> Iterable[tuple[int, int]]:
-    """`candidate_pair_blocks`, one pair at a time."""
-    for ia, ib in candidate_pair_blocks(h, max_dist):
-        yield from zip(ia.tolist(), ib.tolist())
 
 
 class _DSU:

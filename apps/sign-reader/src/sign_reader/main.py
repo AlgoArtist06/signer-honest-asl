@@ -17,7 +17,7 @@ from fastapi.staticfiles import StaticFiles
 from PIL import Image, UnidentifiedImageError
 from starlette.types import Receive, Scope, Send
 
-from . import APP, captures, engine, motion
+from . import APP, captures, engine
 
 WEB = APP / "web"
 MODEL_CARD = APP / "model_card.json"
@@ -33,7 +33,6 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         BOOT.update(ready=False, error=str(e))
         print(f"[boot] model unavailable: {e}")
-    motion.load()
     yield
 
 
@@ -42,8 +41,7 @@ app = FastAPI(title="Sign Reader", version="1.0.0", lifespan=lifespan)
 
 @app.get("/api/health")
 def health() -> dict:
-    return {**engine.health(), "ready": BOOT["ready"], "error": BOOT["error"],
-            "motion": motion.status()}
+    return {**engine.health(), "ready": BOOT["ready"], "error": BOOT["error"]}
 
 
 @app.get("/api/model")
@@ -74,8 +72,7 @@ async def landmarks(
 ) -> JSONResponse:
     """Hand landmarks and sharpness for one preview frame.
 
-    `hand` is 0-1 coordinates for drawing. `xyz` and `side` are what the page
-    records and later posts to `/api/motion`. No retry, to keep it fast.
+    `hand` is 0-1 coordinates for drawing. No retry, to keep it fast.
     """
     from slr import hands
 
@@ -92,9 +89,8 @@ async def landmarks(
 
     got = hands.detect_hand(arr, retry=False)
     if got is None:
-        return JSONResponse({"hand": None, "xyz": None, "side": None,
-                             "sharpness": None})
-    lm, side = got
+        return JSONResponse({"hand": None, "sharpness": None})
+    lm, _side = got
     h, w = arr.shape[:2]
 
     # Laplacian variance depends on size, so measure at 224px like REFERENCE_SHARPNESS.
@@ -106,10 +102,6 @@ async def landmarks(
 
     return JSONResponse({
         "hand": [[round(float(x) / w, 5), round(float(y) / h, 5)] for x, y, _ in lm],
-        # Pixel coordinates, which is what the clip model was trained on.
-        "xyz": [[round(float(x), 2), round(float(y), 2), round(float(z), 2)]
-                for x, y, z in lm],
-        "side": side,
         "sharpness": round(sharp, 1),
     })
 
@@ -135,21 +127,6 @@ async def predict(
         out["capture_id"] = None
         print(f"[capture] not kept: {e}")
     return JSONResponse(out)
-
-
-@app.post("/api/motion")
-def read_motion(
-    frames: list = Body(..., embed=True,
-                        description="(N, 21, 3) landmarks, detected frames only"),
-    sides: list | None = Body(None, embed=True,
-                              description="per-frame 'Left'/'Right' from the detector"),
-    top_k: int = Query(3, ge=1, le=10),
-) -> dict:
-    """Recorded landmarks in, one sign out (including J, Z and words)."""
-    try:
-        return motion.read(frames, sides, top_k)
-    except motion.BadClip as e:
-        raise HTTPException(400 if motion.status()["ok"] else 503, str(e)) from e
 
 
 @app.post("/api/label")
