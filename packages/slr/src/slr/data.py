@@ -137,7 +137,7 @@ def split_cross_source(rows: list[dict], train_sources: list[str],
     return keep
 
 
-def _report(rows: list[dict], allow_straddle: bool = False) -> None:
+def _report(rows: list[dict]) -> None:
     by_split = Counter(r["split"] for r in rows)
     print(f"[split] {dict(by_split)}")
     vocab = {r["label"] for r in rows}
@@ -150,8 +150,6 @@ def _report(rows: list[dict], allow_straddle: bool = False) -> None:
         print(f"[split]   {s}: {len(sub)} imgs, {g} groups, "
               f"{len(vocab) - len(missing)}/{len(vocab)} classes"
               + (f", MISSING {sorted(missing)}" if missing else ""))
-    if allow_straddle:
-        return
     seen: dict[str, str] = {}
     for r in rows:
         if r["split"] and seen.setdefault(r["group"], r["split"]) != r["split"]:

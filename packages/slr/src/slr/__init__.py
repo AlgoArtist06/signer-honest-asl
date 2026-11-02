@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from functools import cache
 
-__version__ = "0.1.0"
-
 
 @cache
 def _register_safe_globals() -> None:

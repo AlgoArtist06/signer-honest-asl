@@ -57,7 +57,7 @@ def candidate_pair_blocks(h: np.ndarray, max_dist: int, cap: int = 4000,
     has to be exact.
     """
     n_bands = max(2, max_dist + 1)
-    dropped_buckets = dropped_rows = 0
+    dropped_buckets = 0
     for col in _bands(h, n_bands).T:
         order = np.argsort(col, kind="stable")
         vals = col[order]
@@ -67,14 +67,12 @@ def candidate_pair_blocks(h: np.ndarray, max_dist: int, cap: int = 4000,
                 continue
             if e - s > cap:
                 dropped_buckets += 1
-                dropped_rows += int(e - s)
                 continue
             idx = order[s:e]
             ia, ib = np.triu_indices(len(idx), k=1)
             yield idx[ia], idx[ib]
     if stats is not None:
         stats["dropped_buckets"] = dropped_buckets
-        stats["dropped_rows"] = dropped_rows
         stats["cap"] = cap
         stats["exact"] = dropped_buckets == 0
 

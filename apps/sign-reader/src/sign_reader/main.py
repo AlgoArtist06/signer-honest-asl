@@ -76,9 +76,6 @@ async def landmarks(
     """
     from slr import hands
 
-    if not hands.available():
-        raise HTTPException(503, "hand tracking needs mediapipe and opencv")
-
     raw = await image.read()
     if not raw or len(raw) > engine.MAX_UPLOAD_BYTES:
         raise HTTPException(400, "empty or oversized frame")

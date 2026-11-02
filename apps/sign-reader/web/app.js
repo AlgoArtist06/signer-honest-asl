@@ -612,12 +612,6 @@ async function trackOnce() {
   const body = new FormData();
   body.append('image', blob, 'f.jpg');
   const r = await fetch('/api/landmarks', { method: 'POST', body });
-  if (r.status === 503) {                 // no mediapipe on this box: stop asking
-    track.stop = true;
-    els.trackChip.hidden = true;
-    els.focusChip.hidden = true;
-    return;
-  }
   if (!r.ok) return;
   const d = await r.json();
   trackChip(!!d.hand);

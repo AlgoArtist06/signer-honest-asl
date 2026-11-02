@@ -82,10 +82,6 @@ def load() -> dict:
     fusion_cal = None
     coverage = blob.get("coverage")
     if blob.get("fusion"):
-        from slr import hands
-
-        if not hands.available():
-            raise RuntimeError("fused bundle needs mediapipe and opencv for geometry")
         meta = blob["fusion"]
         fusion_weight = float(meta["pixel_weight"])
         if not 0.0 <= fusion_weight <= 1.0:
@@ -117,8 +113,7 @@ def load() -> dict:
         classes=[blob["classes"][i] for i in keep], temp=temp, threshold=thresh,
         preset=blob["preset"], img_size=blob["img_size"],
         tf=slr_data.build_transforms(blob["img_size"], train=False),
-        coverage=coverage, metrics=blob.get("metrics", {}),
-        ckpt=str(ckpt), calibrated="temperature" in blob,
+        coverage=coverage, calibrated="temperature" in blob,
         geometry=fused, fusion_weight=fusion_weight, fusion_cal=fusion_cal,
     )
     print(f"[engine] {blob['preset']} on {dev}: {len(blob['classes'])} classes, "
@@ -208,7 +203,7 @@ def predict(raw: bytes, top_k: int = 3, explain: bool = False) -> dict:
     probs = pixel_probs
     served_model = "pixel"
     if _STATE["geometry"] is not None:
-        geometry_probs, _found, _side = LM.probs(
+        geometry_probs = LM.probs(
             _STATE["geometry"], np.asarray(img), _STATE["bundle_classes"])
         fused_probs = LM.fuse(pixel_probs.detach().cpu().numpy(), geometry_probs,
                               _STATE["geometry"].landmark_weight)
@@ -229,15 +224,11 @@ def predict(raw: bytes, top_k: int = 3, explain: bool = False) -> dict:
 
     heat = crop = None
     if explain:
-        try:
-            # Gradient-weighted, so the map explains this letter, not any class.
-            heat = _heatmap_png_b64(
-                M.grad_attention(_STATE["net"], x, int(_STATE["keep"][idx[0]])),
-                _STATE["img_size"])
-            crop = _input_png_b64(x)
-        except TypeError:
-            # Non-ViT backbones have no attention to roll up; answer without it.
-            heat = crop = None
+        # Gradient-weighted, so the map explains this letter, not any class.
+        heat = _heatmap_png_b64(
+            M.grad_attention(_STATE["net"], x, int(_STATE["keep"][idx[0]])),
+            _STATE["img_size"])
+        crop = _input_png_b64(x)
 
     return {
         "label": label,

@@ -37,7 +37,6 @@ def build(preset: str, n_classes: int, drop_path: float = 0.1,
 
     m = timm.create_model(PRESETS[preset].timm_name, pretrained=pretrained,
                           num_classes=n_classes, drop_path_rate=drop_path)
-    m.slr_preset = preset
     return m
 
 
@@ -48,11 +47,7 @@ def n_params(m: nn.Module) -> int:
 def param_groups(m: nn.Module, lr: float, weight_decay: float = 0.05,
                  layer_decay: float | None = None) -> list[dict]:
     """Optimiser groups: no weight decay on norms and biases, optional layer-wise LR decay."""
-    n_layers = len(getattr(m, "blocks", []) or [])
-    if layer_decay is not None and not n_layers:
-        print(f"[model] {type(m).__name__} has no flat .blocks; "
-              "ignoring layer_decay and using a uniform learning rate")
-        layer_decay = None
+    n_layers = len(m.blocks)
 
     def _decay(name: str) -> float:
         if layer_decay is None:

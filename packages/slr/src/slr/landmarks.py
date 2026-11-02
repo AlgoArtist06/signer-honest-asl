@@ -160,22 +160,20 @@ def augment(p: torch.Tensor, g: torch.Generator) -> torch.Tensor:
 
 
 def fit(rows: np.ndarray, y: np.ndarray, n_classes: int,
-        featurize: Callable[[np.ndarray], np.ndarray] = lambda x: x,
-        weights: np.ndarray | None = None, augment=None, epochs: int = 60,
-        seed: int = 0, hidden: int = 256, batch: int = 512, lr: float = 3e-3
-        ) -> tuple[nn.Module, np.ndarray, np.ndarray]:
+        featurize: Callable[[np.ndarray], np.ndarray], weights: np.ndarray,
+        epochs: int = 60, seed: int = 0, hidden: int = 256, batch: int = 512,
+        lr: float = 3e-3) -> tuple[nn.Module, np.ndarray, np.ndarray]:
     """Train the MLP. Returns (net, mean, std).
 
-    Batches are sampled with replacement by `weights`. `augment` runs on each
-    batch before `featurize`. The scaler is fitted on unaugmented rows.
+    Batches are sampled with replacement by `weights` and jittered by `augment`
+    before `featurize`. The scaler is fitted on unaugmented rows.
     """
     g = torch.Generator().manual_seed(seed)
     torch.manual_seed(seed)
     X = featurize(rows)
     mu, sd = X.mean(0), X.std(0) + 1e-6
     rows_t, yt = torch.as_tensor(rows, dtype=torch.float32), torch.as_tensor(y)
-    w = torch.as_tensor(np.ones(len(rows)) if weights is None else weights,
-                        dtype=torch.float64)
+    w = torch.as_tensor(weights, dtype=torch.float64)
 
     net = build(n_classes, X.shape[1], hidden)
     opt = torch.optim.AdamW(net.parameters(), lr=lr, weight_decay=1e-2)
@@ -185,7 +183,7 @@ def fit(rows: np.ndarray, y: np.ndarray, n_classes: int,
     net.train()
     for _ in range(steps):
         b = torch.multinomial(w, batch, replacement=True, generator=g)
-        r = rows_t[b] if augment is None else augment(rows_t[b], g)
+        r = augment(rows_t[b], g)
         x = torch.tensor((featurize(r.numpy()) - mu) / sd, dtype=torch.float32)
         opt.zero_grad(set_to_none=True)
         crit(net(x), yt[b]).backward()
@@ -206,7 +204,7 @@ class Model(NamedTuple):
     feature: str
 
 
-def model_from_blob(blob: dict, landmark_weight: float | None = None) -> Model:
+def model_from_blob(blob: dict, landmark_weight: float) -> Model:
     """Build a servable model from a bundle dict, embedded or standalone."""
     tag = blob.get("feature")
     if tag not in FEATURES:
@@ -220,15 +218,12 @@ def model_from_blob(blob: dict, landmark_weight: float | None = None) -> Model:
     net = build(len(blob["classes"]), dim, blob.get("hidden", 256))
     net.load_state_dict(blob["state_dict"])
     net.eval()
-    w = (landmark_weight if landmark_weight is not None
-         else float(blob.get("landmark_weight", blob.get("fusion_weight", 1.0))))
-    return Model(net, mean, std, list(blob["classes"]), w, tag)
+    return Model(net, mean, std, list(blob["classes"]), landmark_weight, tag)
 
 
 @torch.no_grad()
 def class_probs(model: Model, lm: np.ndarray, side=None) -> np.ndarray:
     """(N, len(model.classes)) softmax for detected hands, built with the model's own feature."""
-    model.net.eval()
     x = (features(lm, side, model.feature) - model.mean) / model.std
     return torch.softmax(model.net(torch.tensor(x, dtype=torch.float32)), 1).numpy()
 
@@ -239,9 +234,8 @@ def predict(model: Model, lm: np.ndarray, found: np.ndarray, side=None) -> np.nd
     return np.where(found, np.asarray(model.classes, dtype=object)[idx], "nothing")
 
 
-def probs(model: Model, arr: np.ndarray, out_classes: list[str]
-          ) -> tuple[np.ndarray, bool, str | None]:
-    """Probabilities over `out_classes`, whether a hand was found, and which hand.
+def probs(model: Model, arr: np.ndarray, out_classes: list[str]) -> np.ndarray:
+    """Probabilities over `out_classes` for one photo.
 
     Unknown classes get zero. No hand means all probability on `nothing`.
     """
@@ -249,14 +243,14 @@ def probs(model: Model, arr: np.ndarray, out_classes: list[str]
     got = hands.detect_hand(arr)
     if got is None:
         out[out_classes.index("nothing")] = 1.0
-        return out, False, None
+        return out
     lm, side = got
     p = class_probs(model, lm, side)[0]
     where = {c: i for i, c in enumerate(model.classes)}
     for j, name in enumerate(out_classes):
         if name in where:
             out[j] = p[where[name]]
-    return out, True, side
+    return out
 
 
 def fuse(pixel: np.ndarray, landmark: np.ndarray,
@@ -359,7 +353,7 @@ def run(caches: list[Path], out: Path | None = None, seed: int = 0,
         counts = {s: int((src[rows] == s).sum()) for s in train_src}
         w = np.array([1.0 / counts[s] for s in src[rows]])
         net, mu, sd = fit(P[rows], y[rows], len(classes), FEATURES[feature].fn,
-                          weights=w, augment=augment, seed=seed)
+                          weights=w, seed=seed)
         return Model(net, mu, sd, classes, 1.0, feature)
 
     model = train(tr)
@@ -424,8 +418,6 @@ def main(argv: list[str] | None = None) -> int:
     a.path = a.path if a.cmd == "train" else a.path[0]
 
     if a.cmd == "cache":
-        if not hands.available():
-            raise SystemExit("landmark extraction needs mediapipe and opencv; run `uv sync`")
         rows = sources.read_manifest(a.path)
         cache_manifest(rows, a.out or (CACHE / "all.npz"), a.workers)
         return 0

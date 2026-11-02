@@ -27,16 +27,6 @@ def model_path() -> Path:
     return MODEL_PATH
 
 
-def available() -> bool:
-    """True when this machine can actually detect hands."""
-    try:
-        import cv2  # noqa: F401
-        import mediapipe  # noqa: F401
-        return True
-    except ImportError:
-        return False
-
-
 def _detector():
     global _DETECTOR
     if _DETECTOR is None:
