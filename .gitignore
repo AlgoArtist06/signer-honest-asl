@@ -9,3 +9,11 @@ dataset/raw/
 *.pt
 *.part
 dataset/models/
+
+# organizer: regenerable junk
+.DS_Store
+*.pyc
+*.blend1
+node_modules/
+venv/
+tmp/
